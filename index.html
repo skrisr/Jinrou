@@ -11,7 +11,7 @@
 <style>
 /*
 ============================================================
- 仕様書 / カスタム指示（ユーザー提示のオリジナル要件）
+ 仕様書 / カスタム指示（ユーザー提示のオリジナル要件・第1版＋第2版）
 ============================================================
 
 ■ 概要
@@ -19,21 +19,41 @@
   シグナリング／ルーム一覧の永続化に Supabase、
   ゲーム中の通信は PeerJS(WebRTC) を使用する単一HTMLファイル構成。
 
-■ ユーザーからの要件（原文ベース）
+■ 第1版の要件
   1. SupabaseとP2Pを使用したものを作る。
   2. SupabaseにP2Pの接続キーを保存する。
   3. P2Pの接続キーは "JinrouOnlineRoom" + "部屋名" とする。
   4. 公式サーバー(1つのみ)に参加する／部屋を作成する／
      作成された部屋に参加する、という導線を用意する。
   5. P2Pのホストが退出したときも自動で再接続（ホスト自動引き継ぎ）する。
-  6. 必要なことは事前にユーザーへ質問する。
-  7. コード冒頭にコメントアウトで仕様書とカスタム指示を書く。
+  6. コード冒頭にコメントアウトで仕様書とカスタム指示を書く。
      それ以外のコード内コメントは書かない。
-  8. フロントエンドはHTML/CSS/JS単一ファイル。
-  9. P2PライブラリはPeerJS。
-  10. Supabaseプロジェクトは用意済み（URL / publishable key）。
-  11. 制作範囲：基本の人狼ゲームロジックを含む
-      （役職＝人狼／占い師／村人、夜の襲撃・占い、昼の投票）。
+  7. フロントエンドはHTML/CSS/JS単一ファイル、P2PライブラリはPeerJS。
+  8. 基本の人狼ゲームロジック（役職＝人狼／占い師／村人、
+     夜の襲撃・占い、昼の投票）を実装する。
+
+■ 第2版の追加要件（原文ベース）
+  1. 初日(1日目)の犠牲者としてBotが選ばれるようにする。
+  2. 役職の説明を受けられるようにする（役職一覧＋自分の役職の説明）。
+  3. 夜になったら役職持ちが一斉（同時）に能力を使えるようにする。
+  4. 死んだらそのプレイヤー専用のチャットルームに移る。
+     チャットは「生存者用」「死亡者用」に分かれ、加えてDM（個別チャット）
+     も可能。ただし夜の間は一切発言できない。生存者と死亡者は互いに
+     発言・DMできない（チャンネルが完全に分離される）。
+  5. 役職カードを引くアニメーション（カードをめくって役職を確認する演出）
+     を実装する。
+  6. 公式鯖の数など、デバッグ的な情報は通常UIに表示しない。
+  7. ローカルストレージに各種データ（プレイヤー名・設定・デバッグログ等）
+     を保存する。
+  8. 自分で部屋を作成した場合、ホストは他のプレイヤーにホスト権限を
+     譲渡できる（手動ホスト移譲）。
+  9. ホストは部屋作成時に「最大人数」「Botの数」「Botの強さ(3段階)」
+     を設定できる。Botは現時点では発言内容が適当（役職についての
+     嘘や「〇〇が怪しい」といった発言）で、発言確率・投票・夜の行動を
+     Botの強さ(弱い/普通/強い)によって変化させる。
+  10. 設定画面に「デバッグモード」を追加し、ONにすると接続や処理の
+      エラー・成功メッセージのログを表示できるようにする。ログは
+      コピーボタンでクリップボードにコピーできるようにする。
 
 ■ Supabase テーブル定義（あらかじめ Supabase の SQL Editor で実行しておくこと）
 
@@ -48,53 +68,46 @@
 
   alter table rooms enable row level security;
 
-  create policy "anon can read rooms"
-    on rooms for select using (true);
-  create policy "anon can insert rooms"
-    on rooms for insert with check (true);
-  create policy "anon can update rooms"
-    on rooms for update using (true);
+  create policy "anon can read rooms"   on rooms for select using (true);
+  create policy "anon can insert rooms" on rooms for insert with check (true);
+  create policy "anon can update rooms" on rooms for update using (true);
 
-  ※ publishable key（匿名キー）から誰でも読み書きできる設計。
-    個人の趣味サイト向けの簡易構成であり、荒らし対策等は含まない。
+  ※ publishable key（匿名キー）から誰でも読み書きできる簡易構成。
 
 ■ ルームキー設計
-  ルームキー = "JinrouOnlineRoom" + 部屋名（URLセーフ化した文字列）
-  公式部屋は固定名 "Official" を使用し、キーは常に
-  "JinrouOnlineRoomOfficial" になる（＝公式サーバーは常に1つだけ存在）。
+  ルームキー = "JinrouOnlineRoom" + 部屋名（URLセーフ化）。
+  ホストは常にこのルームキーそのものを自分のPeer IDとして登録する。
+  公式部屋は固定キー "JinrouOnlineRoomOfficial" で常に1つだけ存在する。
+  Supabaseにはロビー一覧表示用のメタ情報（部屋名・人数・更新時刻）
+  のみを保存する。
 
-  PeerJSの「ホスト側」は必ずこのルームキーそのものを自分の Peer ID
-  として登録する。ゲスト側は常にこのルームキーへ peer.connect() する
-  だけで接続できるため、シグナリング情報自体をSupabaseに都度書き込む
-  必要はない。Supabaseにはロビー一覧表示・生存確認（心臓鼓動更新）
-  のためのメタ情報（部屋名・人数・更新時刻）のみを保存する。
+■ ホスト引き継ぎ（自動／手動 共通の仕組み）
+  ゲストは常に最新のゲーム状態をローカルに保持している。
+  自動：ホストとの接続が切れると、保持しているプレイヤーID一覧のうち
+    辞書順最小のIDを持つ者が新ホストに選出される（全員が同じ状態を
+    見ているため決定的に同じ結果になる）。
+  手動：ホストが「ホストを譲る」を選ぶと、譲渡先のIDを状態に一時的に
+    書き込んでから接続を切るため、全員が同じ次期ホストを認識できる。
+  いずれの場合も、選ばれた新ホストは自分のPeerを一旦破棄し、
+  ルームキーそのものをIDとして再生成することでホストの座を引き継ぎ、
+  直前のゲーム状態（役職・生存状況・チャット履歴含む）を復元して
+  ゲームを継続する。
+  ※ 信頼できるサーバーを介さないP2P構成のため、役職情報や生死状況は
+    ゲーム状態(state)に含めてブロードキャストしている。ブラウザの
+    開発者ツールを見れば理論上は他人の役職が分かってしまう点は、
+    継続性を優先したP2P構成ゆえのトレードオフとしてユーザーへ明示する。
+  ※ DM（個別チャット）のみは当事者2名にのみ個別送信する設計にして、
+    ブロードキャストされる公開state には含めていない。
 
-■ ホスト自動引き継ぎの仕組み
-  ホストは自分がプレイヤーとして参加する場合もPeer IDにルームキーを
-  使う。ゲスト側は最新のゲーム状態(state)をローカルに保持しており、
-  ホストとの接続が切れたら、保持しているプレイヤーID一覧の中で
-  辞書順が最小のIDを持つゲストが新ホストに選出される（全員が同じ
-  最新stateを参照するため決定的に同じ結果になる）。
-  新ホストは自分のPeerを一旦破棄し、ルームキーそのものをIDとして
-  Peerを再生成することでホストの座を引き継ぎ、直前のゲーム状態
-  （役職・生存状況含む）を復元してゲームを継続する。他のゲストは
-  ルームキーへの再接続を一定間隔でリトライし続けることで自動復帰する。
-  ※ 役職情報は継続性確保のためstateに含めてブロードキャストしている。
-    ブラウザの開発者ツールを見れば他人の役職が分かってしまう点は、
-    信頼できるサーバーを介さないP2P構成ゆえのトレードオフとして
-    ユーザーへ明示する。
-
-■ 通信プロトコル（PeerJS DataConnection 上のJSONメッセージ）
-  ゲスト→ホスト: join / rejoin / chat / night_action / vote
-  ホスト→個別:   role / seer_result
-  ホスト→全体:   state（フェーズ・生存状況・ログ等の公開情報一式）
-
-■ ゲームフロー
-  ロビー → (ホストが開始) → 夜(襲撃・占い) → 昼(結果発表→議論→投票)
-  → 勝敗判定 → 未決着なら夜へ戻る／決着したら結果画面→ロビーへ戻る
-  勝利条件：人狼が0人＝村側勝利／人狼数が人狼以外の生存者数以上＝人狼側勝利
-  最少人数：3人から開始可能。人狼数=max(1, floor(人数/3))、
-  4人以上で占い師1人、残りは村人。
+■ Bot（AI仮プレイヤー）
+  ホストがゲーム開始時に設定数だけBotを生成し、他プレイヤーと同様に
+  役職を割り当てる。Botの夜の行動・投票はホストがタイマーで自動実行し、
+  昼の議論中はランダムな間隔で「強さ」に応じたテンプレート発言
+  （適当な怪しさ指摘、白黒の嘘の主張など）を行う。強さは3段階
+  （弱い／普通／強い）で、強いBotほど発言の説得力や偽占い結果の
+  主張などを行う確率が上がる。
+  1日目の夜の犠牲者は、生存しているBotがいれば必ずBotの中から
+  選ばれる（実際の人狼の襲撃先指定に関わらず上書きする）。
 
 ============================================================
 */
@@ -127,196 +140,102 @@ body{
   flex-direction:column;
   align-items:center;
 }
-.wrap{
-  width:100%;
-  max-width:560px;
-  padding:28px 18px 60px;
-}
-.brand{
-  display:flex;
-  align-items:center;
-  gap:14px;
-  margin-bottom:26px;
-}
+.wrap{width:100%;max-width:560px;padding:28px 18px 60px;position:relative;}
+.brand{display:flex;align-items:center;gap:14px;margin-bottom:22px;}
 .moon{
   width:44px;height:44px;border-radius:50%;flex:none;
   background:radial-gradient(circle at 35% 35%, #fff8e6, var(--village) 70%);
   box-shadow:0 0 22px 2px rgba(216,166,87,.45);
   transition:background 1s ease, box-shadow 1s ease;
 }
-.moon.night{
-  background:radial-gradient(circle at 35% 35%, #e9ecff, #4a4f78 70%);
-  box-shadow:0 0 22px 2px rgba(120,140,255,.35);
-}
-.moon.vote{
-  background:radial-gradient(circle at 35% 35%, #ffd9d9, var(--wolf) 70%);
-  box-shadow:0 0 22px 2px rgba(178,58,72,.5);
-}
-h1{
-  font-family:var(--serif);
-  font-weight:800;
-  font-size:26px;
-  letter-spacing:.08em;
-  margin:0;
-}
+.moon.night{background:radial-gradient(circle at 35% 35%, #e9ecff, #4a4f78 70%);box-shadow:0 0 22px 2px rgba(120,140,255,.35);}
+.moon.vote{background:radial-gradient(circle at 35% 35%, #ffd9d9, var(--wolf) 70%);box-shadow:0 0 22px 2px rgba(178,58,72,.5);}
+h1{font-family:var(--serif);font-weight:800;font-size:26px;letter-spacing:.08em;margin:0;}
 .tagline{color:var(--ink-dim);font-size:12px;letter-spacing:.12em;margin-top:2px;}
-.panel{
-  background:var(--bg-panel);
-  border:1px solid var(--line);
-  border-radius:var(--radius);
-  padding:22px;
-  margin-bottom:16px;
+.gear-btn{
+  position:absolute;top:28px;right:18px;width:38px;height:38px;border-radius:50%;
+  background:var(--bg-panel);border:1px solid var(--line);color:var(--ink-dim);
+  font-size:17px;cursor:pointer;display:flex;align-items:center;justify-content:center;
 }
+.gear-btn:hover{color:var(--ink);border-color:#4a4f78;}
+.panel{background:var(--bg-panel);border:1px solid var(--line);border-radius:var(--radius);padding:22px;margin-bottom:16px;}
 .screen{display:none;}
 .screen.active{display:block;}
 .btn{
-  width:100%;
-  padding:14px 18px;
-  border-radius:10px;
-  border:1px solid var(--line);
-  background:var(--bg-panel-2);
-  color:var(--ink);
-  font-family:var(--sans);
-  font-size:15px;
-  font-weight:700;
-  cursor:pointer;
-  margin-top:10px;
+  width:100%;padding:14px 18px;border-radius:10px;border:1px solid var(--line);
+  background:var(--bg-panel-2);color:var(--ink);font-family:var(--sans);font-size:15px;
+  font-weight:700;cursor:pointer;margin-top:10px;
   transition:transform .15s ease, border-color .15s ease, background .15s ease;
   text-align:left;
 }
 .btn:hover{border-color:#4a4f78;transform:translateY(-1px);}
 .btn:active{transform:translateY(0);}
-.btn.primary{
-  background:linear-gradient(135deg, var(--village), #b9822f);
-  color:#1a1408;
-  border:none;
-  text-align:center;
-}
-.btn.danger{
-  background:linear-gradient(135deg, var(--wolf), var(--wolf-glow));
-  color:#fff0ef;
-  border:none;
-  text-align:center;
-}
-.btn.small{padding:9px 14px;font-size:13px;margin-top:0;}
+.btn.primary{background:linear-gradient(135deg, var(--village), #b9822f);color:#1a1408;border:none;text-align:center;}
+.btn.danger{background:linear-gradient(135deg, var(--wolf), var(--wolf-glow));color:#fff0ef;border:none;text-align:center;}
+.btn.ghost{background:transparent;text-align:center;}
+.btn.small{padding:9px 14px;font-size:13px;margin-top:0;width:auto;}
 .btn:disabled{opacity:.4;cursor:not-allowed;transform:none;}
-.field{
-  width:100%;
-  padding:12px 14px;
-  border-radius:10px;
-  border:1px solid var(--line);
-  background:var(--bg);
-  color:var(--ink);
-  font-family:var(--sans);
-  font-size:15px;
-  margin-top:8px;
-}
+.field{width:100%;padding:12px 14px;border-radius:10px;border:1px solid var(--line);background:var(--bg);color:var(--ink);font-family:var(--sans);font-size:15px;margin-top:8px;}
 .field:focus{outline:none;border-color:var(--village);}
+select.field{appearance:none;}
 .label{font-size:12px;color:var(--ink-dim);letter-spacing:.08em;margin-top:14px;}
-.eyebrow{
-  font-size:11px;
-  letter-spacing:.18em;
-  color:var(--village);
-  font-weight:700;
-  margin-bottom:8px;
-}
-.room-row{
-  display:flex;
-  justify-content:space-between;
-  align-items:center;
-  padding:12px 4px;
-  border-bottom:1px solid var(--line);
-}
+.eyebrow{font-size:11px;letter-spacing:.18em;color:var(--village);font-weight:700;margin-bottom:8px;}
+.row2{display:grid;grid-template-columns:1fr 1fr;gap:10px;}
+.room-row{display:flex;justify-content:space-between;align-items:center;padding:12px 4px;border-bottom:1px solid var(--line);}
 .room-row:last-child{border-bottom:none;}
 .room-name{font-weight:700;}
 .room-meta{color:var(--ink-dim);font-size:12px;margin-top:2px;}
 .empty{color:var(--ink-dim);font-size:13px;padding:14px 4px;text-align:center;}
 .player-list{display:flex;flex-wrap:wrap;gap:8px;margin-top:10px;}
-.chip{
-  padding:7px 12px;
-  border-radius:20px;
-  background:var(--bg-panel-2);
-  border:1px solid var(--line);
-  font-size:13px;
-}
+.chip{padding:7px 12px;border-radius:20px;background:var(--bg-panel-2);border:1px solid var(--line);font-size:13px;display:flex;align-items:center;gap:6px;}
 .chip.me{border-color:var(--village);color:var(--village);}
 .chip.dead{opacity:.35;text-decoration:line-through;}
-.phase-bar{
-  display:flex;
-  justify-content:space-between;
-  align-items:baseline;
-  margin-bottom:16px;
-}
+.chip .xfer{border:none;background:transparent;color:var(--ink-dim);cursor:pointer;font-size:11px;text-decoration:underline;padding:0;margin-left:2px;}
+.phase-bar{display:flex;justify-content:space-between;align-items:baseline;margin-bottom:16px;}
 .phase-title{font-family:var(--serif);font-size:20px;font-weight:700;}
 .timer{font-variant-numeric:tabular-nums;color:var(--ink-dim);font-size:14px;}
-.role-badge{
-  display:inline-block;
-  padding:6px 14px;
-  border-radius:20px;
-  font-weight:700;
-  font-size:13px;
-  margin-bottom:14px;
-}
-.role-badge.wolf{background:rgba(178,58,72,.18);color:#ff8f9a;border:1px solid var(--wolf);}
+.role-badge{display:inline-block;padding:6px 14px;border-radius:20px;font-weight:700;font-size:13px;margin-bottom:14px;}
+.role-badge.werewolf{background:rgba(178,58,72,.18);color:#ff8f9a;border:1px solid var(--wolf);}
 .role-badge.seer{background:rgba(124,156,196,.18);color:#a9c6e8;border:1px solid var(--seer);}
 .role-badge.villager{background:rgba(216,166,87,.18);color:#f0c884;border:1px solid var(--village);}
 .target-list{display:flex;flex-direction:column;gap:8px;margin-top:10px;}
-.target{
-  display:flex;
-  justify-content:space-between;
-  align-items:center;
-  padding:10px 14px;
-  border-radius:10px;
-  border:1px solid var(--line);
-  background:var(--bg);
-  cursor:pointer;
-}
+.target{display:flex;justify-content:space-between;align-items:center;padding:10px 14px;border-radius:10px;border:1px solid var(--line);background:var(--bg);cursor:pointer;}
 .target.selected{border-color:var(--village);background:var(--bg-panel-2);}
-.target.disabled{opacity:.3;cursor:not-allowed;}
-.log{
-  margin-top:16px;
-  max-height:180px;
-  overflow-y:auto;
-  border-top:1px solid var(--line);
-  padding-top:10px;
-  display:flex;
-  flex-direction:column;
-  gap:5px;
-}
+.log{margin-top:16px;max-height:160px;overflow-y:auto;border-top:1px solid var(--line);padding-top:10px;display:flex;flex-direction:column;gap:5px;}
 .log-line{font-size:13px;color:var(--ink-dim);}
 .log-line.sys{color:var(--village);}
 .chat-row{display:flex;gap:8px;margin-top:10px;}
 .chat-row .field{margin-top:0;}
-.banner{
-  background:rgba(178,58,72,.14);
-  border:1px solid var(--wolf);
-  color:#ff9aa4;
-  padding:12px 14px;
-  border-radius:10px;
-  font-size:13px;
-  margin-bottom:14px;
-}
-.result-title{
-  font-family:var(--serif);
-  font-size:30px;
-  font-weight:800;
-  text-align:center;
-  margin:18px 0 6px;
-}
+.chat-title{font-size:12px;letter-spacing:.08em;color:var(--ink-dim);margin-top:18px;display:flex;justify-content:space-between;align-items:center;}
+.banner{background:rgba(178,58,72,.14);border:1px solid var(--wolf);color:#ff9aa4;padding:12px 14px;border-radius:10px;font-size:13px;margin-bottom:14px;}
+.result-title{font-family:var(--serif);font-size:30px;font-weight:800;text-align:center;margin:18px 0 6px;}
 .center{text-align:center;}
 .muted{color:var(--ink-dim);font-size:13px;}
-.back-link{
-  color:var(--ink-dim);
-  font-size:13px;
-  cursor:pointer;
-  display:inline-block;
-  margin-top:14px;
-}
+.back-link{color:var(--ink-dim);font-size:13px;cursor:pointer;display:inline-block;margin-top:14px;}
 .back-link:hover{color:var(--ink);}
+.link{color:var(--seer);font-size:12px;cursor:pointer;text-decoration:underline;}
+.modal-overlay{position:fixed;inset:0;background:rgba(6,7,12,.86);display:flex;align-items:center;justify-content:center;z-index:900;padding:20px;}
+.modal-overlay.hidden{display:none;}
+.modal-box{background:var(--bg-panel);border:1px solid var(--line);border-radius:var(--radius);padding:22px;max-width:440px;width:100%;max-height:80vh;overflow-y:auto;}
+.role-info-item{border-bottom:1px solid var(--line);padding:12px 0;}
+.role-info-item:last-child{border-bottom:none;}
+.role-info-item b{font-family:var(--serif);}
+.checkline{display:flex;align-items:center;gap:8px;margin-top:14px;font-size:13px;}
+.debug-box{margin-top:12px;background:var(--bg);border:1px solid var(--line);border-radius:10px;padding:10px;max-height:220px;overflow-y:auto;font-size:11px;color:var(--ink-dim);font-family:monospace;white-space:pre-wrap;}
+.card-overlay{position:fixed;inset:0;background:rgba(6,7,12,.94);display:flex;flex-direction:column;align-items:center;justify-content:center;z-index:950;padding:20px;text-align:center;}
+.role-card{width:220px;height:310px;perspective:1200px;cursor:pointer;}
+.role-card-inner{position:relative;width:100%;height:100%;transition:transform .9s cubic-bezier(.4,.1,.2,1);transform-style:preserve-3d;}
+.role-card.flipped .role-card-inner{transform:rotateY(180deg);}
+.role-card-face{position:absolute;inset:0;backface-visibility:hidden;border-radius:16px;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:20px;}
+.role-card-front{background:linear-gradient(135deg,#1d2133,#0d0f16);border:1px solid var(--line);font-family:var(--serif);font-size:40px;color:var(--ink-dim);}
+.role-card-back{background:linear-gradient(135deg,var(--bg-panel-2),var(--bg));border:2px solid var(--village);transform:rotateY(180deg);}
+.role-card-back .rn{font-family:var(--serif);font-size:26px;font-weight:800;margin-bottom:10px;}
+.card-hint{color:var(--ink-dim);font-size:13px;margin-top:18px;}
 </style>
 </head>
 <body>
 <div class="wrap">
+  <button class="gear-btn" onclick="openSettings()">⚙</button>
   <div class="brand">
     <div class="moon" id="moonIcon"></div>
     <div>
@@ -337,9 +256,10 @@ h1{
   <div id="screen-menu" class="screen">
     <div class="panel">
       <div class="eyebrow">メニュー</div>
-      <button class="btn" onclick="uiJoinOfficial()">公式部屋に参加する（1部屋のみ）</button>
+      <button class="btn" onclick="uiJoinOfficial()">公式部屋に参加する</button>
       <button class="btn" onclick="showScreen('screen-create')">部屋を作成する</button>
       <button class="btn" onclick="uiOpenRoomList()">作成された部屋に参加する</button>
+      <div class="link" style="margin-top:14px;display:inline-block" onclick="openRoleInfo()">役職について見る</div>
     </div>
     <div class="muted center">ようこそ、<span id="menuGreetName"></span> さん</div>
   </div>
@@ -349,6 +269,22 @@ h1{
       <div class="eyebrow">部屋を作成</div>
       <div class="label">部屋名</div>
       <input id="createRoomInput" class="field" maxlength="16" placeholder="よるのむら">
+      <div class="row2">
+        <div>
+          <div class="label">最大人数</div>
+          <input id="maxPlayersInput" type="number" class="field" min="3" max="16" value="8">
+        </div>
+        <div>
+          <div class="label">Botの数</div>
+          <input id="botCountInput" type="number" class="field" min="0" max="8" value="0">
+        </div>
+      </div>
+      <div class="label">Botの強さ</div>
+      <select id="botLevelInput" class="field">
+        <option value="1">弱い</option>
+        <option value="2" selected>普通</option>
+        <option value="3">強い</option>
+      </select>
       <button class="btn primary" style="margin-top:16px" onclick="uiCreateRoom()">作成して入室</button>
       <div id="createError" class="muted"></div>
     </div>
@@ -368,10 +304,10 @@ h1{
     <div id="lobbyBanner"></div>
     <div class="panel">
       <div class="eyebrow" id="lobbyRoomName">部屋</div>
-      <div class="muted" id="lobbyRoleNote"></div>
       <div class="player-list" id="lobbyPlayers"></div>
       <button class="btn primary" id="startBtn" style="margin-top:18px;display:none" onclick="hostStartGame()">ゲームを開始する</button>
       <div class="muted" id="lobbyWaitNote" style="margin-top:10px"></div>
+      <div class="link" style="margin-top:10px;display:inline-block" onclick="openRoleInfo()">役職について見る</div>
       <div class="log" id="lobbyLog"></div>
       <div class="chat-row">
         <input id="lobbyChatInput" class="field" placeholder="チャット..." onkeydown="if(event.key==='Enter')sendChat('lobbyChatInput')">
@@ -391,10 +327,22 @@ h1{
       <div id="roleBadgeWrap"></div>
       <div id="actionArea"></div>
       <div class="player-list" id="gamePlayers"></div>
+
+      <div class="chat-title"><span id="mainChatLabel">生存者チャット</span></div>
       <div class="log" id="gameLog"></div>
       <div class="chat-row">
         <input id="gameChatInput" class="field" placeholder="チャット..." onkeydown="if(event.key==='Enter')sendChat('gameChatInput')">
-        <button class="btn small" onclick="sendChat('gameChatInput')">送信</button>
+        <button class="btn small" id="gameChatBtn" onclick="sendChat('gameChatInput')">送信</button>
+      </div>
+
+      <div class="chat-title">
+        <span>DM</span>
+        <select id="dmTarget" class="field" style="margin:0;width:auto;padding:4px 8px;font-size:12px" onchange="renderDMLog()"></select>
+      </div>
+      <div class="log" id="dmLog"></div>
+      <div class="chat-row">
+        <input id="dmInput" class="field" placeholder="DMを送る..." onkeydown="if(event.key==='Enter')sendDM()">
+        <button class="btn small" id="dmBtn" onclick="sendDM()">送信</button>
       </div>
     </div>
   </div>
@@ -408,6 +356,45 @@ h1{
   </div>
 </div>
 
+<div class="modal-overlay hidden" id="settingsModal">
+  <div class="modal-box">
+    <div class="eyebrow">設定</div>
+    <div class="checkline">
+      <input type="checkbox" id="debugToggle" onchange="toggleDebugMode()">
+      <label for="debugToggle">デバッグモード（接続エラー・成功ログを表示）</label>
+    </div>
+    <div id="debugSection" style="display:none">
+      <div class="debug-box" id="debugBox"></div>
+      <button class="btn small" style="margin-top:8px" onclick="copyDebugLogs()">ログをコピー</button>
+    </div>
+    <button class="btn ghost" style="margin-top:18px" onclick="closeSettings()">閉じる</button>
+  </div>
+</div>
+
+<div class="modal-overlay hidden" id="roleInfoModal">
+  <div class="modal-box">
+    <div class="eyebrow">役職について</div>
+    <div class="role-info-item"><b>人狼</b><div class="muted">夜になると仲間の人狼と同時に、村人の中から1人を選んで襲撃できます。人狼の数が人狼以外の生存者数以上になれば人狼陣営の勝利です。</div></div>
+    <div class="role-info-item"><b>占い師</b><div class="muted">夜になると1人を選び、その人が人狼かどうかを知ることができます。結果を元に議論をリードしましょう。</div></div>
+    <div class="role-info-item"><b>村人</b><div class="muted">特別な能力はありません。話し合いと投票で人狼を見つけ出しましょう。</div></div>
+    <button class="btn ghost" style="margin-top:8px" onclick="closeRoleInfo()">閉じる</button>
+  </div>
+</div>
+
+<div class="card-overlay hidden" id="cardOverlay">
+  <div class="role-card" id="roleCard" onclick="flipRoleCard()">
+    <div class="role-card-inner">
+      <div class="role-card-face role-card-front">?</div>
+      <div class="role-card-face role-card-back">
+        <div class="rn" id="cardRoleName"></div>
+        <div class="muted" id="cardRoleDesc" style="font-size:13px"></div>
+      </div>
+    </div>
+  </div>
+  <div class="card-hint" id="cardHint">カードをタップして役職を確認</div>
+  <button class="btn primary" id="cardStartBtn" style="display:none;max-width:220px;margin-top:16px" onclick="dismissRoleCard()">はじめる</button>
+</div>
+
 <script>
 const SUPABASE_URL = "https://gzszxogwrxqmlksqfjma.supabase.co";
 const SUPABASE_KEY = "sb_publishable_iP2uXd88GR_osFMyYDykTA_O8tyodQZ";
@@ -419,6 +406,20 @@ const MIN_PLAYERS = 3;
 const NIGHT_MS = 20000;
 const DAY_MS = 45000;
 const VOTE_MS = 20000;
+
+const ROLE_INFO = {
+  werewolf: { label: '人狼', desc: '夜に仲間と1人を選んで襲撃できます。人狼の数が他の生存者数以上になれば勝利です。' },
+  seer: { label: '占い師', desc: '夜に1人を選び、人狼かどうかを知ることができます。' },
+  villager: { label: '村人', desc: '特別な能力はありません。議論と投票で人狼を見つけましょう。' }
+};
+
+const BOT_NAMES = ['クロ','ミライ','ソラ','つむぎ','はやぶさ','かなで','しずく','ゆき','あかね','りん','ノア','ヒカリ'];
+
+const BOT_TEMPLATES = {
+  1: ['なんとなく{target}が怪しい気がする…', 'わからないよ〜', '多数決で決めよう', '{target}、ちょっと静かすぎない?'],
+  2: ['{target}の発言、なんか辻褄が合ってない気がする', '自分は村人です、信じてください', '占い師さん、そろそろ結果を教えてほしい', '{target}を疑ってる人多くない?'],
+  3: ['占い師CO。{target}は白でした', '{target}の初日の動きが不自然だった。今日はそこに投票しよう', '冷静に考えて、{target}が一番怪しいと思う', '自分は占い師です。信じてもらえると助かります']
+};
 
 let myName = "";
 let myId = "";
@@ -435,9 +436,66 @@ let heartbeatTimer = null;
 let tickTimer = null;
 let phaseTimeout = null;
 let reconnectTimer = null;
+let botTimers = [];
 let selectedTarget = null;
 let selectedVote = null;
 let leavingIntentionally = false;
+let revealPending = false;
+let revealFlipped = false;
+let dmThreads = {};
+let dmSelectedId = null;
+let settings = { debugMode: false, maxPlayers: 8, botCount: 0, botLevel: 2 };
+let debugLogs = [];
+
+function loadLocal(key, fallback){
+  try{ const v = localStorage.getItem(key); return v ? JSON.parse(v) : fallback; }catch(e){ return fallback; }
+}
+function saveLocal(key, value){
+  try{ localStorage.setItem(key, JSON.stringify(value)); }catch(e){}
+}
+
+(function initLocal(){
+  const savedName = loadLocal('jinro_name', '');
+  if(savedName) document.addEventListener('DOMContentLoaded', ()=>{ document.getElementById('nameInput').value = savedName; });
+  settings = Object.assign(settings, loadLocal('jinro_settings', {}));
+  debugLogs = loadLocal('jinro_debug_logs', []);
+})();
+
+function debugLog(kind, msg){
+  const entry = '[' + new Date().toLocaleTimeString('ja-JP') + '] ' + (kind === 'error' ? '❌ ' : '✅ ') + msg;
+  debugLogs.push(entry);
+  if(debugLogs.length > 200) debugLogs.shift();
+  saveLocal('jinro_debug_logs', debugLogs);
+  renderDebugPanel();
+}
+
+function openSettings(){
+  document.getElementById('debugToggle').checked = !!settings.debugMode;
+  document.getElementById('debugSection').style.display = settings.debugMode ? 'block' : 'none';
+  renderDebugPanel();
+  document.getElementById('settingsModal').classList.remove('hidden');
+}
+function closeSettings(){ document.getElementById('settingsModal').classList.add('hidden'); }
+function toggleDebugMode(){
+  settings.debugMode = document.getElementById('debugToggle').checked;
+  saveLocal('jinro_settings', settings);
+  document.getElementById('debugSection').style.display = settings.debugMode ? 'block' : 'none';
+  renderDebugPanel();
+}
+function renderDebugPanel(){
+  if(!settings.debugMode) return;
+  const box = document.getElementById('debugBox');
+  if(!box) return;
+  box.textContent = debugLogs.join('\n');
+  box.scrollTop = box.scrollHeight;
+}
+function copyDebugLogs(){
+  const text = debugLogs.join('\n');
+  if(navigator.clipboard) navigator.clipboard.writeText(text);
+}
+
+function openRoleInfo(){ document.getElementById('roleInfoModal').classList.remove('hidden'); }
+function closeRoleInfo(){ document.getElementById('roleInfoModal').classList.add('hidden'); }
 
 function showScreen(id){
   document.querySelectorAll('.screen').forEach(s=>s.classList.remove('active'));
@@ -452,6 +510,7 @@ function confirmName(){
   const v = document.getElementById('nameInput').value.trim();
   if(!v){ document.getElementById('nameInput').focus(); return; }
   myName = v;
+  saveLocal('jinro_name', myName);
   document.getElementById('menuGreetName').textContent = myName;
   showScreen('screen-menu');
 }
@@ -464,7 +523,6 @@ function addLog(container, text, sys){
   line.textContent = text;
   el.appendChild(line);
   el.scrollTop = el.scrollHeight;
-  while(el.children.length > 60) el.removeChild(el.firstChild);
 }
 
 function pushStateLog(text){
@@ -474,28 +532,38 @@ function pushStateLog(text){
   if(lastState.log.length > 60) lastState.log.shift();
 }
 
+function pushChat(channel, from, text){
+  const key = channel === 'alive' ? 'chatAlive' : 'chatDead';
+  lastState[key] = lastState[key] || [];
+  lastState[key].push({ from, text });
+  if(lastState[key].length > 80) lastState[key].shift();
+}
+
 function initPeer(id){
   return new Promise((resolve, reject)=>{
     const p = id ? new Peer(id) : new Peer();
     let done = false;
-    p.on('open', ()=>{ done = true; resolve(p); });
-    p.on('error', err=>{ if(!done) reject(err); else handlePeerRuntimeError(err); });
+    p.on('open', ()=>{ done = true; debugLog('ok', 'Peer接続確立: ' + p.id); resolve(p); });
+    p.on('error', err=>{
+      debugLog('error', 'Peerエラー: ' + (err && err.type ? err.type : err));
+      if(!done){ done = true; reject(err); }
+      else handlePeerRuntimeError(err);
+    });
   });
 }
 
-function handlePeerRuntimeError(err){
-  if(isHost) return;
-  if(err && (err.type === 'peer-unavailable')) return;
-}
+function handlePeerRuntimeError(err){}
 
-async function upsertRoom(key, name, official){
-  await sb.from('rooms').upsert({
+async function upsertRoom(key, name, official, roomSettings){
+  const { error } = await sb.from('rooms').upsert({
     room_key: key,
     room_name: name,
     is_official: official,
     player_count: Object.keys(conns).length + 1,
     updated_at: new Date().toISOString()
   }, { onConflict: 'room_key', ignoreDuplicates: official });
+  if(error) debugLog('error', 'Supabase upsert失敗: ' + error.message);
+  else debugLog('ok', 'Supabaseにルーム情報を保存しました');
 }
 
 function startHeartbeat(){
@@ -504,7 +572,7 @@ function startHeartbeat(){
     sb.from('rooms').update({
       player_count: Object.keys(conns).length + 1,
       updated_at: new Date().toISOString()
-    }).eq('room_key', roomKey);
+    }).eq('room_key', roomKey).then(({error})=>{ if(error) debugLog('error','ハートビート失敗: '+error.message); });
   }, 8000);
 }
 
@@ -515,7 +583,7 @@ async function uiJoinOfficial(){
     room_key: roomKey, room_name: '公式部屋', is_official: true,
     player_count: 0, updated_at: new Date().toISOString()
   }, { onConflict: 'room_key', ignoreDuplicates: true });
-  joinRoom(roomKey, '公式部屋', true);
+  joinRoom(roomKey, '公式部屋', { maxPlayers: 16, botCount: 0, botLevel: 1 });
 }
 
 async function uiCreateRoom(){
@@ -529,10 +597,16 @@ async function uiCreateRoom(){
     errEl.textContent = 'その部屋名は現在使用中です';
     return;
   }
+  const roomSettings = {
+    maxPlayers: Math.max(MIN_PLAYERS, parseInt(document.getElementById('maxPlayersInput').value,10) || 8),
+    botCount: Math.max(0, parseInt(document.getElementById('botCountInput').value,10) || 0),
+    botLevel: parseInt(document.getElementById('botLevelInput').value,10) || 2
+  };
+  saveLocal('jinro_settings', Object.assign(settings, roomSettings));
   roomName = raw;
   roomKey = key;
   await upsertRoom(key, raw, false);
-  await becomeHost(key, raw);
+  await becomeHost(key, raw, roomSettings);
 }
 
 async function uiOpenRoomList(){
@@ -540,6 +614,7 @@ async function uiOpenRoomList(){
   const body = document.getElementById('roomListBody');
   body.innerHTML = '<div class="empty">読み込み中...</div>';
   const { data, error } = await sb.from('rooms').select('*').eq('is_official', false).order('updated_at', { ascending: false });
+  if(error) debugLog('error', 'ルーム一覧取得失敗: ' + error.message);
   if(error || !data || data.length === 0){
     body.innerHTML = '<div class="empty">現在作成されている部屋はありません</div>';
     return;
@@ -553,11 +628,11 @@ async function uiOpenRoomList(){
   active.forEach(r=>{
     const row = document.createElement('div');
     row.className = 'room-row';
-    row.innerHTML = `<div><div class="room-name">${escapeHtml(r.room_name)}</div><div class="room-meta">${r.player_count || 1}人参加中</div></div>`;
+    row.innerHTML = '<div><div class="room-name">' + escapeHtml(r.room_name) + '</div><div class="room-meta">' + (r.player_count || 1) + '人参加中</div></div>';
     const btn = document.createElement('button');
     btn.className = 'btn small';
     btn.textContent = '参加';
-    btn.onclick = ()=> joinRoom(r.room_key, r.room_name, false);
+    btn.onclick = ()=> joinRoom(r.room_key, r.room_name, null);
     row.appendChild(btn);
     body.appendChild(row);
   });
@@ -567,15 +642,16 @@ function escapeHtml(s){
   return (s || '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 }
 
-async function becomeHost(key, name, retry){
+async function becomeHost(key, name, roomSettings, retry){
   retry = retry || 0;
   try{
     peer = await initPeer(key);
   }catch(err){
     if(retry < 5){
       await new Promise(r=>setTimeout(r, 1200));
-      return becomeHost(key, name, retry + 1);
+      return becomeHost(key, name, roomSettings, retry + 1);
     }
+    debugLog('error', '部屋の作成に失敗しました');
     alert('部屋の作成に失敗しました。しばらくしてから再試行してください。');
     return;
   }
@@ -584,27 +660,31 @@ async function becomeHost(key, name, retry){
   roomKey = key;
   roomName = name;
   conns = {};
-  lastState = lastState && lastState.phase && lastState.phase !== 'lobby' && lastState.phase !== 'ended'
-    ? lastState
-    : {
+  const continuing = lastState && lastState.phase && lastState.phase !== 'lobby' && lastState.phase !== 'ended';
+  if(!continuing){
+    lastState = {
       phase: 'lobby', round: 0,
-      players: [{ id: myId, name: myName, alive: true }],
-      roles: {}, deaths: [], log: ['部屋を作成しました'], timerEnd: 0
+      players: [{ id: myId, name: myName, alive: true, isBot: false }],
+      roles: {}, deaths: [], log: ['部屋を作成しました'],
+      chatAlive: [], chatDead: [], timerEnd: 0,
+      settings: roomSettings || { maxPlayers: 8, botCount: 0, botLevel: 2 }
     };
+  }
   if(!lastState.players.find(p=>p.id===myId)){
-    lastState.players.push({ id: myId, name: myName, alive: true });
+    lastState.players.push({ id: myId, name: myName, alive: true, isBot: false });
   }
   peer.on('connection', conn=>{
     conn.on('open', ()=> setupHostConnection(conn));
   });
   startHeartbeat();
-  upsertRoom(key, name, name===('公式部屋') || key===(ROOM_PREFIX+OFFICIAL_NAME));
+  upsertRoom(key, name, key === (ROOM_PREFIX + OFFICIAL_NAME));
   enterLobbyOrGame();
 }
 
 function setupHostConnection(conn){
   const pid = conn.peer;
   conns[pid] = conn;
+  debugLog('ok', 'プレイヤーが接続しました: ' + pid);
   conn.on('data', data => handleGuestMessage(pid, data));
   conn.on('close', ()=> onGuestLeft(pid));
   conn.on('error', ()=> onGuestLeft(pid));
@@ -616,7 +696,7 @@ function onGuestLeft(pid){
   const wasPlayer = lastState.players.find(p=>p.id===pid);
   lastState.players = lastState.players.filter(p=>p.id!==pid);
   if(wasPlayer){
-    pushStateLog(`${wasPlayer.name} が退出しました`);
+    pushStateLog(wasPlayer.name + ' が退出しました');
     checkWinAndBroadcast();
   }
   renderCurrentScreen();
@@ -630,25 +710,41 @@ function handleGuestMessage(pid, msg){
         conns[pid].send({ type:'error', reason:'game_in_progress' });
         return;
       }
-      p = { id: pid, name: msg.name || '名無し', alive: true };
+      const humanCount = lastState.players.filter(x=>!x.isBot).length;
+      if(humanCount >= (lastState.settings.maxPlayers || 8)){
+        conns[pid].send({ type:'error', reason:'room_full' });
+        return;
+      }
+      p = { id: pid, name: msg.name || '名無し', alive: true, isBot: false };
       lastState.players.push(p);
-      pushStateLog(`${p.name} が入室しました`);
+      pushStateLog(p.name + ' が入室しました');
     }else{
       p.name = msg.name || p.name;
-    }
-    if(lastState.phase !== 'lobby' && lastState.roles[pid]){
-      conns[pid].send({ type:'role', role: lastState.roles[pid] });
+      if(lastState.phase !== 'lobby' && lastState.roles[pid]) conns[pid].send({ type:'role', role: lastState.roles[pid] });
     }
     broadcastState();
   }else if(msg.type === 'chat'){
-    const p = lastState.players.find(x=>x.id===pid);
-    pushStateLog(`${p ? p.name : '???'}: ${String(msg.text).slice(0,200)}`);
-    broadcastState();
+    handleChatFrom(pid, msg.text);
+  }else if(msg.type === 'dm'){
+    routeDM(pid, msg.to, msg.text);
   }else if(msg.type === 'night_action'){
     handleNightAction(pid, msg.target);
   }else if(msg.type === 'vote'){
     handleVote(pid, msg.target);
+  }else if(msg.type === 'become_host_ack'){
+    /* no-op */
   }
+}
+
+function handleChatFrom(pid, text){
+  if(lastState.phase === 'night'){
+    if(conns[pid]) conns[pid].send({ type:'error', reason:'night_no_chat' });
+    return;
+  }
+  const p = lastState.players.find(x=>x.id===pid);
+  if(!p) return;
+  pushChat(p.alive ? 'alive' : 'dead', p.name, text);
+  broadcastState();
 }
 
 function broadcast(msg){
@@ -670,12 +766,13 @@ function connectAsGuest(key, viaRandomPeer){
   });
 }
 
-async function joinRoom(key, displayName, isOfficial){
+async function joinRoom(key, displayName, roomSettingsIfNew){
   roomKey = key;
   roomName = displayName;
   try{
     peer = await initPeer(null);
   }catch(err){
+    debugLog('error', '接続初期化に失敗しました');
     alert('接続の初期化に失敗しました');
     return;
   }
@@ -686,12 +783,12 @@ async function joinRoom(key, displayName, isOfficial){
     hostConn = conn;
     setupGuestConnection(conn);
     conn.send({ type:'join', name: myName });
+    debugLog('ok', 'ホストへの接続に成功しました');
     enterLobbyOrGame();
   }catch(err){
-    if(isOfficial || true){
-      peer.destroy();
-      await becomeHost(key, displayName);
-    }
+    debugLog('error', 'ホストが見つかりません。自分がホストになります');
+    peer.destroy();
+    await becomeHost(key, displayName, roomSettingsIfNew || { maxPlayers: 8, botCount: 0, botLevel: 2 });
   }
 }
 
@@ -706,17 +803,27 @@ function handleHostMessage(msg){
     lastState = msg.state;
     renderCurrentScreen();
   }else if(msg.type === 'role'){
-    myRole = msg.role;
-    renderCurrentScreen();
+    setMyRole(msg.role);
   }else if(msg.type === 'seer_result'){
     seerResult = msg;
     renderCurrentScreen();
+  }else if(msg.type === 'dm'){
+    receiveDM(msg.from, msg.text, false);
+  }else if(msg.type === 'become_host'){
+    promoteToHost();
   }else if(msg.type === 'error'){
-    if(msg.reason === 'game_in_progress'){
-      alert('この部屋は現在ゲーム進行中のため入室できません');
-      showScreen('screen-menu');
-    }
+    if(msg.reason === 'game_in_progress'){ alert('この部屋は現在ゲーム進行中のため入室できません'); showScreen('screen-menu'); }
+    else if(msg.reason === 'room_full'){ alert('この部屋は満員です'); showScreen('screen-menu'); }
+    else if(msg.reason === 'night_no_chat'){ /* ignore */ }
   }
+}
+
+function setMyRole(role){
+  const isNew = myRole !== role;
+  myRole = role;
+  seerResult = null;
+  if(isNew){ revealPending = true; revealFlipped = false; }
+  renderCurrentScreen();
 }
 
 function handleHostLost(){
@@ -724,8 +831,7 @@ function handleHostLost(){
   showBanner('gameBanner', 'ホストとの接続が切れました。再接続しています…');
   showBanner('lobbyBanner', 'ホストとの接続が切れました。再接続しています…');
   if(!lastState){ showScreen('screen-menu'); return; }
-  const candidates = lastState.players.map(p=>p.id).filter(id=>id!==roomKey).sort();
-  const winner = candidates[0];
+  const winner = lastState.pendingHostId || lastState.players.map(p=>p.id).filter(id=>id!==roomKey && !lastState.players.find(x=>x.id===id).isBot).sort()[0];
   if(winner === myId){
     promoteToHost();
   }else{
@@ -737,6 +843,7 @@ function handleHostLost(){
         hostConn = conn;
         setupGuestConnection(conn);
         conn.send({ type:'rejoin', name: myName });
+        debugLog('ok', '新ホストへの再接続に成功しました');
         clearBanner('gameBanner'); clearBanner('lobbyBanner');
       }catch(e){}
     }, 2500);
@@ -744,25 +851,44 @@ function handleHostLost(){
 }
 
 async function promoteToHost(){
-  try{ peer.destroy(); }catch(e){}
+  try{ if(hostConn) hostConn.close(); }catch(e){}
+  try{ if(peer) peer.destroy(); }catch(e){}
   const state = JSON.parse(JSON.stringify(lastState));
   const oldId = myId;
   state.players = state.players.filter(p=>p.id!==roomKey);
   state.players.forEach(p=>{ if(p.id===oldId) p.id = roomKey; });
   if(state.roles[oldId]){ state.roles[roomKey] = state.roles[oldId]; delete state.roles[oldId]; }
+  state.pendingHostId = null;
   lastState = state;
-  await becomeHost(roomKey, roomName);
+  await becomeHost(roomKey, roomName, state.settings);
   clearBanner('gameBanner'); clearBanner('lobbyBanner');
   pushStateLog('ホストが交代しました');
   if(lastState.phase !== 'lobby' && lastState.phase !== 'ended'){
     schedulePhaseResolution();
+    if(lastState.phase === 'day') scheduleBotChat();
   }
   broadcastState();
 }
 
+function transferHost(targetId){
+  if(!isHost) return;
+  if(!confirm('ホスト権限を譲りますか？')) return;
+  lastState.pendingHostId = targetId;
+  broadcastState();
+  if(conns[targetId]) conns[targetId].send({ type:'become_host' });
+  setTimeout(()=>{
+    isHost = false;
+    Object.values(conns).forEach(c=>{ try{ c.close(); }catch(e){} });
+    conns = {};
+    clearInterval(heartbeatTimer);
+    try{ peer.destroy(); }catch(e){}
+    debugLog('ok', 'ホストを ' + targetId + ' に譲渡しました');
+  }, 600);
+}
+
 function showBanner(id, text){
   const el = document.getElementById(id);
-  if(el) el.innerHTML = `<div class="banner">${escapeHtml(text)}</div>`;
+  if(el) el.innerHTML = '<div class="banner">' + escapeHtml(text) + '</div>';
 }
 function clearBanner(id){
   const el = document.getElementById(id);
@@ -779,17 +905,15 @@ function enterLobbyOrGame(){
 function renderCurrentScreen(){
   if(!lastState) return;
   document.getElementById('moonIcon').className = 'moon' + (lastState.phase==='night' ? ' night' : lastState.phase==='vote' ? ' vote' : '');
-  if(document.getElementById('screen-lobby').classList.contains('active')) renderLobby();
-  if(document.getElementById('screen-game').classList.contains('active')) renderGame();
-  if(lastState.phase === 'lobby' && !document.getElementById('screen-result').classList.contains('active') && !document.getElementById('screen-name').classList.contains('active') && !document.getElementById('screen-menu').classList.contains('active') && !document.getElementById('screen-create').classList.contains('active') && !document.getElementById('screen-roomlist').classList.contains('active')){
-    showScreen('screen-lobby'); renderLobby();
-  }
-  if(lastState.phase !== 'lobby' && lastState.phase !== 'ended' && document.getElementById('screen-lobby').classList.contains('active')){
-    showScreen('screen-game'); renderGame();
-  }
-  if(lastState.phase === 'ended' && !document.getElementById('screen-result').classList.contains('active')){
-    renderResult();
-  }
+  const active = document.querySelector('.screen.active');
+  if(!active) return;
+  const id = active.id;
+  if(['screen-lobby','screen-game','screen-create','screen-roomlist','screen-menu','screen-name'].indexOf(id) === -1) return;
+  if(id === 'screen-lobby' && lastState.phase !== 'lobby'){ showScreen('screen-game'); renderGame(); return; }
+  if(id === 'screen-game' && lastState.phase === 'lobby'){ showScreen('screen-lobby'); renderLobby(); return; }
+  if(id === 'screen-game' && lastState.phase === 'ended'){ renderResult(); return; }
+  if(id === 'screen-lobby') renderLobby();
+  if(id === 'screen-game') renderGame();
 }
 
 function renderLobby(){
@@ -799,35 +923,77 @@ function renderLobby(){
   lastState.players.forEach(p=>{
     const chip = document.createElement('div');
     chip.className = 'chip' + (p.id===myId ? ' me' : '');
-    chip.textContent = p.name + (p.id===roomKey ? ' 👑' : '');
+    chip.innerHTML = escapeHtml(p.name) + (p.id===roomKey ? ' 👑' : '') + (p.isBot ? ' 🤖' : '');
+    if(isHost && p.id !== myId && !p.isBot){
+      const btn = document.createElement('button');
+      btn.className = 'xfer';
+      btn.textContent = 'ホストを譲る';
+      btn.onclick = ()=> transferHost(p.id);
+      chip.appendChild(btn);
+    }
     list.appendChild(chip);
   });
   const startBtn = document.getElementById('startBtn');
   const waitNote = document.getElementById('lobbyWaitNote');
+  const total = lastState.players.filter(p=>!p.isBot).length + (isHost ? (lastState.settings.botCount||0) : 0);
   if(isHost){
     startBtn.style.display = 'block';
-    startBtn.disabled = lastState.players.length < MIN_PLAYERS;
-    waitNote.textContent = lastState.players.length < MIN_PLAYERS ? `開始には最低${MIN_PLAYERS}人必要です` : '';
+    startBtn.disabled = total < MIN_PLAYERS;
+    waitNote.textContent = total < MIN_PLAYERS ? ('開始には最低' + MIN_PLAYERS + '人必要です（Bot込み）') : '';
   }else{
     startBtn.style.display = 'none';
     waitNote.textContent = 'ホストの開始を待っています…';
   }
   const logEl = document.getElementById('lobbyLog');
   logEl.innerHTML = '';
-  (lastState.log || []).forEach(l=> addLog('lobbyLog', l));
+  (lastState.log || []).forEach(l=> addLog('lobbyLog', l, true));
 }
 
 function sendChat(inputId){
   const input = document.getElementById(inputId);
   const text = input.value.trim();
   if(!text) return;
+  if(lastState.phase === 'night'){ input.value=''; return; }
   input.value = '';
   if(isHost){
-    const me = lastState.players.find(p=>p.id===myId);
-    pushStateLog(`${me ? me.name : myName}: ${text}`);
-    broadcastState();
+    handleChatFrom(myId, text);
   }else if(hostConn){
     hostConn.send({ type:'chat', text });
+  }
+}
+
+function dmKeyFor(otherId){ return otherId; }
+
+function sendDM(){
+  const targetId = document.getElementById('dmTarget').value;
+  const input = document.getElementById('dmInput');
+  const text = input.value.trim();
+  if(!text || !targetId) return;
+  if(lastState.phase === 'night') return;
+  input.value = '';
+  receiveDM(targetId, text, true);
+  if(isHost){
+    routeDM(myId, targetId, text);
+  }else if(hostConn){
+    hostConn.send({ type:'dm', to: targetId, text });
+  }
+}
+
+function receiveDM(otherId, text, self){
+  dmThreads[otherId] = dmThreads[otherId] || [];
+  dmThreads[otherId].push({ text, self });
+  renderDMLog();
+}
+
+function routeDM(fromId, toId, text){
+  const fromP = lastState.players.find(p=>p.id===fromId);
+  const toP = lastState.players.find(p=>p.id===toId);
+  if(!fromP || !toP) return;
+  if(fromP.alive !== toP.alive) return;
+  if(toId === myId){
+    receiveDM(fromId, text, false);
+  }else if(conns[toId]){
+    conns[toId].send({ type:'dm', from: fromId, text });
   }
 }
 
@@ -837,19 +1003,43 @@ function leaveRoom(){
   clearInterval(reconnectTimer);
   clearInterval(tickTimer);
   clearTimeout(phaseTimeout);
+  clearBotTimers();
   if(isHost){
     sb.from('rooms').delete().eq('room_key', roomKey);
     broadcast({ type:'error', reason:'host_closed' });
   }
   try{ if(peer) peer.destroy(); }catch(e){}
   isHost = false; conns = {}; hostConn = null; lastState = null; myRole = null; seerResult = null;
+  dmThreads = {}; revealPending = false;
   leavingIntentionally = false;
   showScreen('screen-menu');
 }
 
+function clearBotTimers(){
+  botTimers.forEach(t=> clearTimeout(t));
+  botTimers = [];
+}
+
+function spawnBots(count, level){
+  const used = new Set();
+  const bots = [];
+  for(let i=0;i<count;i++){
+    let name;
+    do{ name = BOT_NAMES[Math.floor(Math.random()*BOT_NAMES.length)]; }while(used.has(name));
+    used.add(name);
+    bots.push({ id: 'bot_' + i + '_' + Date.now(), name, alive: true, isBot: true, botLevel: level });
+  }
+  return bots;
+}
+
 function hostStartGame(){
   if(!isHost) return;
-  if(lastState.players.length < MIN_PLAYERS) return;
+  const humanCount = lastState.players.filter(p=>!p.isBot).length;
+  const botCount = lastState.settings.botCount || 0;
+  if(humanCount + botCount < MIN_PLAYERS) return;
+  lastState.players = lastState.players.filter(p=>!p.isBot);
+  const bots = spawnBots(botCount, lastState.settings.botLevel || 2);
+  lastState.players = lastState.players.concat(bots);
   const ids = lastState.players.map(p=>p.id);
   for(let i=ids.length-1;i>0;i--){ const j=Math.floor(Math.random()*(i+1)); [ids[i],ids[j]]=[ids[j],ids[i]]; }
   const n = ids.length;
@@ -865,8 +1055,10 @@ function hostStartGame(){
   lastState.players.forEach(p=> p.alive = true);
   lastState.round = 1;
   lastState.log = ['ゲームが始まりました'];
+  lastState.chatAlive = [];
+  lastState.chatDead = [];
   Object.keys(roles).forEach(id=>{
-    if(id === myId){ myRole = roles[id]; }
+    if(id === myId){ setMyRole(roles[id]); }
     else if(conns[id]) conns[id].send({ type:'role', role: roles[id] });
   });
   startNightPhase();
@@ -876,8 +1068,9 @@ function startNightPhase(){
   lastState.phase = 'night';
   lastState.nightActions = {};
   lastState.timerEnd = Date.now() + NIGHT_MS;
-  pushStateLog(`${lastState.round}日目の夜になりました`);
+  pushStateLog(lastState.round + '日目の夜になりました');
   broadcastState();
+  scheduleBotNightActions();
   schedulePhaseResolution();
 }
 
@@ -890,6 +1083,27 @@ function schedulePhaseResolution(){
     else if(lastState.phase === 'day') startVotePhase();
     else if(lastState.phase === 'vote') resolveVote();
   }, remain);
+}
+
+function aliveNonBotIds(){ return lastState.players.filter(p=>p.alive).map(p=>p.id); }
+
+function scheduleBotNightActions(){
+  clearBotTimers();
+  const bots = lastState.players.filter(p=>p.isBot && p.alive);
+  bots.forEach(bot=>{
+    const role = lastState.roles[bot.id];
+    if(role !== 'werewolf' && role !== 'seer') return;
+    const delay = 2000 + Math.random()*6000;
+    const t = setTimeout(()=>{
+      if(lastState.phase !== 'night') return;
+      let pool = lastState.players.filter(p=>p.alive && p.id!==bot.id);
+      if(role === 'werewolf') pool = pool.filter(p=>lastState.roles[p.id] !== 'werewolf');
+      if(pool.length === 0) return;
+      const target = pool[Math.floor(Math.random()*pool.length)];
+      handleNightAction(bot.id, target.id);
+    }, delay);
+    botTimers.push(t);
+  });
 }
 
 function handleNightAction(pid, target){
@@ -907,12 +1121,17 @@ function handleNightAction(pid, target){
 function resolveNight(){
   if(!isHost || lastState.phase !== 'night') return;
   clearTimeout(phaseTimeout);
+  clearBotTimers();
   const tally = {};
   Object.values(lastState.nightActions).forEach(a=>{
     if(a.role === 'werewolf') tally[a.target] = (tally[a.target]||0) + 1;
   });
   let killTarget = null, max = 0;
   Object.entries(tally).forEach(([id,c])=>{ if(c > max){ max = c; killTarget = id; } });
+  if(lastState.round === 1){
+    const aliveBots = lastState.players.filter(p=>p.isBot && p.alive);
+    if(aliveBots.length > 0) killTarget = aliveBots[Math.floor(Math.random()*aliveBots.length)].id;
+  }
   const deaths = [];
   if(killTarget){
     const victim = lastState.players.find(p=>p.id===killTarget);
@@ -928,7 +1147,7 @@ function resolveNight(){
     }
   });
   lastState.deaths = deaths;
-  pushStateLog(deaths.length ? `${deaths.join('、')} が無残な姿で見つかりました` : '今夜、犠牲者はいませんでした');
+  pushStateLog(deaths.length ? (deaths.join('、') + ' が無残な姿で見つかりました') : '今夜、犠牲者はいませんでした');
   if(checkWinAndBroadcast()) return;
   startDayPhase();
 }
@@ -937,18 +1156,68 @@ function startDayPhase(){
   lastState.phase = 'day';
   lastState.timerEnd = Date.now() + DAY_MS;
   broadcastState();
+  scheduleBotChat();
   schedulePhaseResolution();
+}
+
+function scheduleBotChat(){
+  clearBotTimers();
+  const bots = lastState.players.filter(p=>p.isBot && p.alive);
+  if(bots.length === 0) return;
+  const fire = ()=>{
+    if(lastState.phase !== 'day') return;
+    const alive = lastState.players.filter(p=>p.alive);
+    const speaker = bots[Math.floor(Math.random()*bots.length)];
+    if(!speaker.alive) { scheduleNext(); return; }
+    const level = speaker.botLevel || 1;
+    const chance = level === 3 ? 0.85 : level === 2 ? 0.65 : 0.45;
+    if(Math.random() < chance){
+      const pool = alive.filter(p=>p.id!==speaker.id);
+      if(pool.length){
+        const target = pool[Math.floor(Math.random()*pool.length)];
+        const templates = BOT_TEMPLATES[level] || BOT_TEMPLATES[1];
+        const line = templates[Math.floor(Math.random()*templates.length)].replace('{target}', target.name);
+        pushChat('alive', speaker.name, line);
+        broadcastState();
+      }
+    }
+    scheduleNext();
+  };
+  function scheduleNext(){
+    if(lastState.phase !== 'day') return;
+    const t = setTimeout(fire, 5000 + Math.random()*7000);
+    botTimers.push(t);
+  }
+  scheduleNext();
 }
 
 function startVotePhase(){
   if(!isHost) return;
   clearTimeout(phaseTimeout);
+  clearBotTimers();
   lastState.phase = 'vote';
   lastState.votes = {};
   lastState.timerEnd = Date.now() + VOTE_MS;
   pushStateLog('投票の時間です');
   broadcastState();
+  scheduleBotVotes();
   schedulePhaseResolution();
+}
+
+function scheduleBotVotes(){
+  const bots = lastState.players.filter(p=>p.isBot && p.alive);
+  bots.forEach(bot=>{
+    const delay = 2000 + Math.random()*10000;
+    const t = setTimeout(()=>{
+      if(lastState.phase !== 'vote') return;
+      let pool = lastState.players.filter(p=>p.alive && p.id!==bot.id);
+      if((bot.botLevel||1) >= 2) pool = pool.filter(p=>lastState.roles[p.id] !== 'werewolf').concat(pool.filter(p=>lastState.roles[p.id]==='werewolf' && Math.random()<0.2));
+      if(pool.length === 0) pool = lastState.players.filter(p=>p.alive && p.id!==bot.id);
+      const target = pool[Math.floor(Math.random()*pool.length)];
+      handleVote(bot.id, target.id);
+    }, delay);
+    botTimers.push(t);
+  });
 }
 
 function handleVote(pid, target){
@@ -963,6 +1232,7 @@ function handleVote(pid, target){
 function resolveVote(){
   if(!isHost || lastState.phase !== 'vote') return;
   clearTimeout(phaseTimeout);
+  clearBotTimers();
   const tally = {};
   Object.values(lastState.votes).forEach(t=>{ tally[t] = (tally[t]||0) + 1; });
   let top = null, max = 0, tie = false;
@@ -972,7 +1242,7 @@ function resolveVote(){
   });
   if(top && !tie){
     const executed = lastState.players.find(p=>p.id===top);
-    if(executed){ executed.alive = false; pushStateLog(`${executed.name} が処刑されました`); }
+    if(executed){ executed.alive = false; pushStateLog(executed.name + ' が処刑されました'); }
   }else{
     pushStateLog('票が割れたため、処刑は行われませんでした');
   }
@@ -991,6 +1261,7 @@ function checkWinAndBroadcast(){
     else if(wolves.length >= others.length) winner = 'wolf';
   }
   if(winner){
+    clearBotTimers();
     lastState.phase = 'ended';
     lastState.winner = winner;
     pushStateLog(winner === 'wolf' ? '人狼の勝利です' : '村人陣営の勝利です');
@@ -1001,7 +1272,38 @@ function checkWinAndBroadcast(){
   return false;
 }
 
+function flipRoleCard(){
+  if(revealFlipped) return;
+  revealFlipped = true;
+  document.getElementById('roleCard').classList.add('flipped');
+  const info = ROLE_INFO[myRole] || { label:'村人', desc:'' };
+  document.getElementById('cardRoleName').textContent = info.label;
+  document.getElementById('cardRoleDesc').textContent = info.desc;
+  document.getElementById('cardHint').style.display = 'none';
+  document.getElementById('cardStartBtn').style.display = 'block';
+}
+function dismissRoleCard(){
+  revealPending = false;
+  document.getElementById('cardOverlay').classList.add('hidden');
+  renderGame();
+}
+
+function renderRoleCardOverlay(){
+  document.getElementById('cardOverlay').classList.remove('hidden');
+  document.getElementById('roleCard').classList.toggle('flipped', revealFlipped);
+  document.getElementById('cardHint').style.display = revealFlipped ? 'none' : 'block';
+  document.getElementById('cardStartBtn').style.display = revealFlipped ? 'block' : 'none';
+  if(revealFlipped){
+    const info = ROLE_INFO[myRole] || { label:'村人', desc:'' };
+    document.getElementById('cardRoleName').textContent = info.label;
+    document.getElementById('cardRoleDesc').textContent = info.desc;
+  }
+}
+
 function renderGame(){
+  if(revealPending){ renderRoleCardOverlay(); return; }
+  document.getElementById('cardOverlay').classList.add('hidden');
+
   document.getElementById('phaseTitle').textContent = lastState.phase==='night' ? '夜' : lastState.phase==='day' ? '昼・議論' : '投票';
   const tickEl = document.getElementById('phaseTimer');
   clearInterval(tickTimer);
@@ -1012,8 +1314,8 @@ function renderGame(){
 
   const badgeWrap = document.getElementById('roleBadgeWrap');
   if(myRole){
-    const label = myRole==='werewolf' ? '人狼' : myRole==='seer' ? '占い師' : '村人';
-    badgeWrap.innerHTML = `<div class="role-badge ${myRole}">あなたの役職：${label}</div>`;
+    const info = ROLE_INFO[myRole];
+    badgeWrap.innerHTML = '<div class="role-badge ' + myRole + '">あなたの役職：' + info.label + '（' + info.desc + '）</div>';
   }else{
     badgeWrap.innerHTML = '';
   }
@@ -1024,11 +1326,11 @@ function renderGame(){
   actionArea.innerHTML = '';
 
   if(!amAlive){
-    actionArea.innerHTML = '<div class="muted">あなたは脱落しました。結果を見守りましょう。</div>';
+    actionArea.innerHTML = '<div class="muted">あなたは脱落しました。死亡者チャットで見守りましょう。</div>';
   }else if(lastState.phase === 'night' && (myRole === 'werewolf' || myRole === 'seer')){
-    const label = myRole === 'werewolf' ? '襲撃する相手を選んでください' : '占う相手を選んでください';
+    const label = myRole === 'werewolf' ? '襲撃する相手を選んでください（役職を持つ人は今すぐ同時に行動できます）' : '占う相手を選んでください';
     const wrap = document.createElement('div');
-    wrap.innerHTML = `<div class="label">${label}</div>`;
+    wrap.innerHTML = '<div class="label">' + label + '</div>';
     const list = document.createElement('div');
     list.className = 'target-list';
     lastState.players.filter(p=>p.alive && p.id!==myId).forEach(p=>{
@@ -1038,20 +1340,19 @@ function renderGame(){
       row.textContent = p.name;
       row.onclick = ()=>{
         selectedTarget = p.id;
-        const action = { type:'night_action', target: p.id };
         if(isHost) handleNightAction(myId, p.id);
-        else if(hostConn) hostConn.send(action);
+        else if(hostConn) hostConn.send({ type:'night_action', target: p.id });
         renderGame();
       };
       list.appendChild(row);
     });
     wrap.appendChild(list);
     actionArea.appendChild(wrap);
-    if(myRole === 'seer' && seerResult && lastState.round){
+    if(myRole === 'seer' && seerResult){
       const r = document.createElement('div');
       r.className = 'muted';
       r.style.marginTop = '10px';
-      r.textContent = `占い結果：${seerResult.target} は ${seerResult.isWerewolf ? '人狼' : '人狼ではない'}`;
+      r.textContent = '占い結果：' + seerResult.target + ' は ' + (seerResult.isWerewolf ? '人狼' : '人狼ではない');
       actionArea.appendChild(r);
     }
   }else if(lastState.phase === 'night'){
@@ -1069,9 +1370,8 @@ function renderGame(){
       row.textContent = p.name + (p.id===myId ? '（自分）' : '');
       row.onclick = ()=>{
         selectedVote = p.id;
-        const action = { type:'vote', target: p.id };
         if(isHost) handleVote(myId, p.id);
-        else if(hostConn) hostConn.send(action);
+        else if(hostConn) hostConn.send({ type:'vote', target: p.id });
         renderGame();
       };
       list.appendChild(row);
@@ -1085,16 +1385,50 @@ function renderGame(){
   lastState.players.forEach(p=>{
     const chip = document.createElement('div');
     chip.className = 'chip' + (p.id===myId ? ' me' : '') + (!p.alive ? ' dead' : '');
-    chip.textContent = p.name;
+    chip.textContent = p.name + (p.isBot ? ' 🤖' : '');
     list.appendChild(chip);
   });
 
+  const chatDisabled = lastState.phase === 'night';
+  document.getElementById('mainChatLabel').textContent = amAlive ? '生存者チャット' : '死亡者チャット';
+  document.getElementById('gameChatInput').disabled = chatDisabled;
+  document.getElementById('gameChatInput').placeholder = chatDisabled ? '夜は発言できません' : 'チャット...';
+  document.getElementById('gameChatBtn').disabled = chatDisabled;
+  document.getElementById('dmInput').disabled = chatDisabled;
+  document.getElementById('dmInput').placeholder = chatDisabled ? '夜は発言できません' : 'DMを送る...';
+  document.getElementById('dmBtn').disabled = chatDisabled;
+
   const logEl = document.getElementById('gameLog');
   logEl.innerHTML = '';
-  (lastState.log || []).forEach(l=> addLog('gameLog', l));
+  const chan = amAlive ? (lastState.chatAlive||[]) : (lastState.chatDead||[]);
+  chan.forEach(m=> addLog('gameLog', m.from + ': ' + m.text));
+  (lastState.log||[]).forEach(l=> addLog('gameLog', l, true));
+
+  const dmSelect = document.getElementById('dmTarget');
+  const prevVal = dmSelect.value;
+  dmSelect.innerHTML = '';
+  lastState.players.filter(p=>p.id!==myId && !p.isBot && p.alive===amAlive).forEach(p=>{
+    const opt = document.createElement('option');
+    opt.value = p.id; opt.textContent = p.name;
+    dmSelect.appendChild(opt);
+  });
+  if(prevVal && [...dmSelect.options].some(o=>o.value===prevVal)) dmSelect.value = prevVal;
+  renderDMLog();
 
   if(lastState.phase !== 'night'){ selectedTarget = null; }
   if(lastState.phase !== 'vote'){ selectedVote = null; }
+}
+
+function renderDMLog(){
+  const dmSelect = document.getElementById('dmTarget');
+  const target = dmSelect ? dmSelect.value : null;
+  const el = document.getElementById('dmLog');
+  if(!el) return;
+  el.innerHTML = '';
+  if(!target) return;
+  (dmThreads[target] || []).forEach(m=>{
+    addLog('dmLog', (m.self ? '自分' : '相手') + ': ' + m.text);
+  });
 }
 
 function renderResult(){
@@ -1103,8 +1437,7 @@ function renderResult(){
   document.getElementById('resultTitle').textContent = win === 'wolf' ? '人狼の勝利' : '村人陣営の勝利';
   const roleLines = lastState.players.map(p=>{
     const r = lastState.roles[p.id];
-    const label = r==='werewolf' ? '人狼' : r==='seer' ? '占い師' : '村人';
-    return `${p.name}：${label}`;
+    return p.name + '：' + (ROLE_INFO[r] ? ROLE_INFO[r].label : '村人');
   });
   document.getElementById('resultSub').textContent = roleLines.join(' ／ ');
 }
@@ -1113,11 +1446,14 @@ function backToLobbyScreen(){
   if(isHost){
     lastState.phase = 'lobby';
     lastState.roles = {};
+    lastState.players = lastState.players.filter(p=>!p.isBot);
     lastState.players.forEach(p=> p.alive = true);
     lastState.log = ['ロビーに戻りました'];
+    lastState.chatAlive = [];
+    lastState.chatDead = [];
     broadcastState();
   }
-  myRole = null; seerResult = null;
+  myRole = null; seerResult = null; revealPending = false; dmThreads = {};
   showScreen('screen-lobby');
   renderLobby();
 }
@@ -1129,6 +1465,11 @@ window.addEventListener('beforeunload', ()=>{
       new Blob([JSON.stringify({})], { type:'application/json' })
     );
   }
+});
+
+document.addEventListener('DOMContentLoaded', ()=>{
+  const savedName = loadLocal('jinro_name', '');
+  if(savedName) document.getElementById('nameInput').value = savedName;
 });
 </script>
 </body>
