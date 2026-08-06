@@ -10,64 +10,62 @@
 <style>
 /*
 ============================================================
- 仕様書 / カスタム指示（ユーザー提示の要件・第3版：サーバー接続化）
+ 仕様書 / カスタム指示（第4版：13役職・GM Bot・観戦・パスワード対応）
 ============================================================
 
-■ 概要
-  人狼(Werewolf)ゲームをブラウザ上で対戦できるサイト。
-  第1版・第2版はPeerJS(WebRTC)によるP2P構成だったが、本版(第3版)では
-  P2Pを廃止し、Supabase(Postgres + Realtime + RPC)のみによる
-  完全サーバー接続構成に置き換える。ホストという概念も廃止し、
-  進行はサーバー側のタイムスタンプとクライアントの冪等な進行関数
-  （最速で到達したクライアントが進行をトリガーする「楽観的アドバンス」方式）
-  によって行う。
-
-■ 第3版の要件（原文ベース）
-  1. 最初の画面を「公式部屋に参加する／部屋を作成する／
-     既存の部屋に参加する」の3択にする（名前入力を最初にしない）。
-  2. 表示名の入力は、部屋に参加する直前（公式・作成・参加のいずれの
-     導線でも部屋に入る直前）に行う。
-  3. 表示名はその部屋の中で重複できないようにする（重複していたら
-     エラーを出し、名前を変えさせる）。
-  4. P2Pをやめ、完全にサーバー接続（Supabase）にする。
-  5. 部屋名は「words1+words2+8桁数字」形式でランダム生成する
-     （ユーザー提供のロジックを移植）。
-  6. 自動改行が不自然にならないよう、CSSのword-break/overflow-wrapを
-     適切に設定する。
-  7. 画面サイズを固定の狭い中央カラムから、画面全体を使う
-     レイアウトに変更する。
-  8. 既存の部屋に参加する場合、参加者は「部屋一覧画面」に留まらず、
-     即座にロビー画面に遷移する（参加者が増え続けるだけで画面遷移
-     しないバグを修正）。
-  9. 接続まわりの不具合（再接続ループ、二重登録、イベント多重購読等）
-     に注意して実装する。
-  10. 既存コードのCSS/JS/HTMLで壊れていた箇所（ボタンが押せない等の
-      不具合）を修正する。
-  11. レイアウトを「左：チャット欄／右：メンバー・情報欄」の
-      2カラム構成にする。
-  12. メンション、返信（リプライ）、DM、役職者専用トークができる
-      ようにする。
-  13. 役職者の夜の行動（襲撃・占い）と役職者専用トークは、すべて
-      「夜のあいだ」に完結させる（昼にはならない）。
-  14. 役職カードは役職名と簡単な説明のみを表示する（既存のカード
-      めくり演出は維持する）。
-  15. Botには（既存同様）状況に応じた適当な発言をさせる。
+■ 第4版の追加・変更要件（原文ベース）
+  1. 役職を13種に拡張する。
+     村人陣営: 村人／占い師／霊媒師／騎士（狩人）／共有者(2人1組)／
+               猫又／双子(2人1組)
+     人狼陣営: 人狼／狂人／狂信者(人狼を最初から知る狂人上位互換)／
+               大狼(占い・霊媒で人間判定される人狼)
+     第三陣営: 妖狐(人狼襲撃無効・占いで死亡・生存で単独勝利)／
+               てるてる坊主(処刑されると単独勝利。死者は全員の正体が
+               見える)
+  2. 囁き（ささやき）機能：ゲーム開始時に生存者をランダムに円形に
+     着席させ、隣（両隣）の人にだけ囁ける専用チャンネルを持つ。
+  3. チャットは「相手（チャンネル）をスライドタブで横に切り替え」、
+     「発言はテキスト自由入力」の両対応にする。
+  4. 人狼・狂人（および狂信者・大狼など人狼陣営の一部）は初日から
+     通常通り殺害・行動できる（"1日目は人狼を殺せない"制限は撤廃）。
+     1日目の犠牲者がBot固定になる仕様も撤廃し、通常の投票・襲撃結果に
+     委ねる。
+  5. 進行専任の「ゲームマスター(GM) Bot」を導入する。GM Botは
+     役職を持つ他のプレイヤーボット（人狼Bot・占いBot等）とは完全に
+     別人格・別レイヤーであり、発言や実況は一切行わず、フェーズの
+     時間切れ検知とフェーズ進行（夜→昼→投票→…）の実行のみを担当する。
+     ルーム作成時に自動的にGM Botが1体生成され、部屋が存在する限り
+     常駐する。
+  6. ホストは部屋作成時に「最大人数」「ボットの数」「パスワード
+     （任意）」を設定できる。ボットの強さは固定値を選ばせず、
+     ボット生成時にランダムに決定する。
+  7. ホストは他プレイヤーにホスト権限を譲渡できる（既存機能を維持）。
+  8. パスワード付き部屋を作れるようにする（部屋一覧では鍵アイコンで
+     区別し、参加時にパスワード入力を要求する）。
+  9. 満員時に参加しようとした人は「観戦者」として入室し、ゲームの
+     様子は見えるが発言・行動はできない。次にロビーへ戻った
+     （フェーズが再び lobby になった）タイミングで、観戦者は自動的に
+     プレイヤーへ昇格する。
+  10. 人間プレイヤーが5人以上いる部屋ではボットを自動追加しない。
+     4人以下の場合、合計人数が概ね10人前後（5〜20人の範囲でランダム
+     な目標人数）になるようボットを自動補充する。ホストが明示的に
+     指定したボット数がある場合はそちらを優先する。
 
 ■ Supabase テーブル定義（Supabase の SQL Editor で実行しておくこと）
 
   create table rooms (
-    room_key     text primary key,
-    room_name    text not null,
-    is_official  boolean default false,
-    max_players  int default 8,
-    bot_count    int default 0,
-    bot_level    int default 2,
-    phase        text default 'lobby',
-    round        int default 0,
-    state        jsonb default '{}'::jsonb,
-    phase_end_at timestamptz,
-    created_at   timestamptz default now(),
-    updated_at   timestamptz default now()
+    room_key      text primary key,
+    room_name     text not null,
+    is_official   boolean default false,
+    max_players   int default 10,
+    bot_count     int default -1,      -- -1 = 自動補充
+    password_hash text,                -- nullなら鍵なし
+    phase         text default 'lobby',
+    round         int default 0,
+    state         jsonb default '{}'::jsonb,
+    phase_end_at  timestamptz,
+    created_at    timestamptz default now(),
+    updated_at    timestamptz default now()
   );
 
   create table room_players (
@@ -76,9 +74,13 @@
     client_id   text not null,
     name        text not null,
     is_bot      boolean default false,
+    bot_kind    text,                  -- 'gm' | 'role' | null(人間)
     bot_level   int default 1,
+    is_spectator boolean default false,
     alive       boolean default true,
     role        text,
+    seat_order  int,
+    twin_group  text,                  -- 双子/共有者のペアID
     joined_at   timestamptz default now(),
     last_seen   timestamptz default now(),
     unique(room_key, name),
@@ -88,12 +90,12 @@
   create table room_messages (
     id          bigint generated always as identity primary key,
     room_key    text references rooms(room_key) on delete cascade,
-    channel     text not null,      -- 'lobby' | 'alive' | 'dead' | 'wolves' | 'dm'
+    channel     text not null,   -- 'lobby'|'alive'|'dead'|'wolves'|'whisper'|'dm'|'pair'
     from_id     text,
     from_name   text,
-    to_id       text,               -- DM宛先(client_id) / それ以外はnull
-    reply_to    bigint,             -- 返信元メッセージid
-    mentions    text[],             -- メンションされたclient_idの配列
+    to_id       text,
+    reply_to    bigint,
+    mentions    text[],
     text        text not null,
     created_at  timestamptz default now()
   );
@@ -110,23 +112,41 @@
   alter publication supabase_realtime add table room_players;
   alter publication supabase_realtime add table room_messages;
 
-  ※ publishable key（匿名キー）から誰でも読み書きできる簡易構成。
-  ※ 進行(夜→昼→投票→…)はサーバー関数を置かず、クライアントが
-    Realtimeで room の phase_end_at を監視し、時刻超過を検知した
-    クライアントが最初に UPDATE を試みる「楽観的アドバンス」方式。
-    同時に複数クライアントが検知しても、Postgresの単一行UPDATEは
-    直列化されるため、実質的に一度しか進行しない。
+  ※ publishable key（匿名キー）から誰でも読み書きできる簡易構成のため、
+    パスワードは平文比較ではなく簡易ハッシュ(SHA-256)をクライアントで
+    計算しroom側に保存・比較する（真に安全な認証ではない点に注意）。
 
-■ 部屋名生成
-  words1 / words2 / 8桁数字を連結した文字列を部屋キーとして生成する
-  （ユーザー提供のロジックをそのまま移植）。表示名（room_name）は
-  ユーザーが入力した部屋名、または公式部屋なら「公式部屋」。
+■ GM Bot について
+  ルーム作成時、room_players に is_bot:true, bot_kind:'gm' の行を1件
+  自動追加する。GM Botはチャットへの発言や襲撃・占いなどの行動を
+  一切行わない。フェーズの phase_end_at を過ぎたことを検知した任意の
+  クライアントが「GM Botとして」進行更新（楽観的アドバンス、単一行
+  UPDATEによる直列化）を試みることで、進行そのものをGM Botの人格に
+  紐づけている。これにより人狼Bot等の役職Botの行動ロジックと、
+  進行トリガーのロジックが完全に分離される。
 
-■ 進行方式
-  夜フェーズの中で「役職者の行動」と「役職者専用チャット(wolves等)」を
-  すべて完結させ、行動が全員完了 or 制限時間超過で開票・議論(昼)へ
-  進む。DMは当事者2名にのみ表示（RLSは簡易構成のため全員に行が
-  見えるが、UI側で自分が当事者のスレッドのみ表示する）。
+■ 役職ボットの強さ
+  部屋作成時にはボットの強さを選択させず、各役職ボットを生成する際に
+  弱い/普通/強いをランダムに割り当てる。
+
+■ 座席と囁き
+  ゲーム開始時、生存者（人間+役職ボット、GM Botは除く）をシャッフルし
+  seat_order を割り振って円形に配置する。囁きチャンネルは
+  「自分のseat_orderの両隣（前後1人ずつ）」にのみ送信・閲覧できる
+  専用チャンネル('whisper')として扱う。
+
+■ 観戦者と自動昇格
+  満員時に参加しようとした人は is_spectator:true として登録される。
+  観戦者はゲーム画面を閲覧できるが、投票・夜行動・チャット送信は
+  一切できない。フェーズが 'lobby' に戻ったタイミングで、
+  is_spectator な行を is_spectator:false に更新し、通常プレイヤーへ
+  昇格させる（定員に余裕がある範囲で先着順）。
+
+■ 人数とボット自動補充
+  人間プレイヤーが5人以上なら bot_count 自動補充なし。
+  4人以下の場合、目標人数を5〜20の範囲でランダム決定（平均的に10人
+  前後になるよう正規乱数近似で生成）し、不足分をボットで補う。
+  ホストが部屋作成時にボット数を明示指定した場合はそれを優先する。
 
 ============================================================
 */
@@ -142,6 +162,7 @@
   --wolf-glow:#7a2530;
   --village:#d8a657;
   --seer:#7c9cc4;
+  --fox:#c07ad8;
   --radius:14px;
   --serif:'Shippori Mincho',serif;
   --sans:'Zen Kaku Gothic New',sans-serif;
@@ -164,7 +185,6 @@ body{
 ::-webkit-scrollbar-thumb{background:var(--line);border-radius:8px;}
 ::-webkit-scrollbar-track{background:transparent;}
 
-/* ---------- topbar ---------- */
 .topbar{
   flex:none;display:flex;align-items:center;gap:14px;
   padding:14px 22px;border-bottom:1px solid var(--line);
@@ -181,7 +201,7 @@ body{
 .topbar h1{font-family:var(--serif);font-weight:800;font-size:19px;letter-spacing:.06em;margin:0;white-space:nowrap;}
 .topbar .tagline{color:var(--ink-dim);font-size:10.5px;letter-spacing:.1em;margin-top:1px;white-space:nowrap;}
 .topbar .spacer{flex:1;}
-.topbar .room-tag{color:var(--ink-dim);font-size:12px;margin-right:6px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:200px;}
+.topbar .room-tag{color:var(--ink-dim);font-size:12px;margin-right:6px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:220px;}
 .gear-btn{
   width:36px;height:36px;border-radius:50%;flex:none;
   background:var(--bg-panel);border:1px solid var(--line);color:var(--ink-dim);
@@ -189,7 +209,6 @@ body{
 }
 .gear-btn:hover{color:var(--ink);border-color:#4a4f78;}
 
-/* ---------- main layout ---------- */
 .main{flex:1;min-height:0;display:flex;flex-direction:column;overflow:hidden;}
 .center-wrap{flex:1;min-height:0;overflow-y:auto;display:flex;justify-content:center;padding:28px 18px 40px;}
 .center-col{width:100%;max-width:560px;}
@@ -201,7 +220,7 @@ body{
 .panel{background:var(--bg-panel);border:1px solid var(--line);border-radius:var(--radius);padding:22px;margin-bottom:16px;}
 .screen{display:none;}
 .screen.active{display:flex;flex-direction:column;flex:1;min-height:0;}
-#screen-name.active,#screen-menu.active,#screen-create.active,#screen-roomlist.active,#screen-lobby.active,#screen-result.active{display:block;}
+#screen-menu.active,#screen-create.active,#screen-roomlist.active,#screen-nameentry.active,#screen-lobby.active,#screen-result.active{display:block;}
 
 .btn{
   width:100%;padding:14px 18px;border-radius:10px;border:1px solid var(--line);
@@ -223,29 +242,34 @@ select.field{appearance:none;}
 .label{font-size:12px;color:var(--ink-dim);letter-spacing:.08em;margin-top:14px;}
 .eyebrow{font-size:11px;letter-spacing:.18em;color:var(--village);font-weight:700;margin-bottom:8px;}
 .row2{display:grid;grid-template-columns:1fr 1fr;gap:10px;}
+.row3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;}
 .room-row{display:flex;justify-content:space-between;align-items:center;padding:12px 4px;border-bottom:1px solid var(--line);gap:10px;}
 .room-row:last-child{border-bottom:none;}
 .room-name{font-weight:700;}
+.room-name .lock{color:var(--village);margin-right:4px;}
 .room-meta{color:var(--ink-dim);font-size:12px;margin-top:2px;}
 .empty{color:var(--ink-dim);font-size:13px;padding:14px 4px;text-align:center;}
 .errtext{color:#ff9aa4;font-size:12.5px;margin-top:8px;min-height:1em;}
-.okstate{border-color:var(--village) !important;}
+.checkline{display:flex;align-items:center;gap:8px;margin-top:14px;font-size:13px;}
 
 .player-list{display:flex;flex-direction:column;gap:8px;}
 .p-row{display:flex;align-items:center;gap:8px;padding:8px 10px;border-radius:10px;background:var(--bg-panel-2);border:1px solid var(--line);font-size:13.5px;}
 .p-row.me{border-color:var(--village);}
 .p-row.dead{opacity:.4;text-decoration:line-through;}
+.p-row.spectator{opacity:.55;font-style:italic;}
 .p-row .nm{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
 .p-row .xfer{border:none;background:transparent;color:var(--ink-dim);cursor:pointer;font-size:11px;text-decoration:underline;padding:0;flex:none;}
 .p-row .mtn-btn{border:none;background:transparent;color:var(--seer);cursor:pointer;font-size:14px;padding:0 2px;flex:none;}
+.p-row .revealed{font-size:11px;color:var(--ink-dim);flex:none;}
 
 .phase-bar{display:flex;justify-content:space-between;align-items:baseline;padding:14px 18px;border-bottom:1px solid var(--line);flex:none;}
 .phase-title{font-family:var(--serif);font-size:19px;font-weight:700;}
 .timer{font-variant-numeric:tabular-nums;color:var(--ink-dim);font-size:13px;}
 .role-badge{display:inline-block;padding:6px 14px;border-radius:20px;font-weight:700;font-size:12.5px;}
-.role-badge.werewolf{background:rgba(178,58,72,.18);color:#ff8f9a;border:1px solid var(--wolf);}
-.role-badge.seer{background:rgba(124,156,196,.18);color:#a9c6e8;border:1px solid var(--seer);}
-.role-badge.villager{background:rgba(216,166,87,.18);color:#f0c884;border:1px solid var(--village);}
+.role-badge.village-team{background:rgba(216,166,87,.18);color:#f0c884;border:1px solid var(--village);}
+.role-badge.wolf-team{background:rgba(178,58,72,.18);color:#ff8f9a;border:1px solid var(--wolf);}
+.role-badge.third-team{background:rgba(192,122,216,.18);color:#e3b6f4;border:1px solid var(--fox);}
+.role-desc-box{margin-top:8px;font-size:12.5px;color:var(--ink-dim);}
 
 .action-area{padding:14px 18px;border-bottom:1px solid var(--line);flex:none;}
 .target-list{display:flex;flex-direction:column;gap:8px;margin-top:10px;}
@@ -253,8 +277,9 @@ select.field{appearance:none;}
 .target.selected{border-color:var(--village);background:var(--bg-panel-2);}
 .target.disabled{opacity:.4;cursor:not-allowed;}
 
-.chat-tabs{display:flex;gap:6px;padding:10px 14px 0;flex:none;flex-wrap:wrap;}
-.chat-tab{padding:7px 12px;border-radius:8px 8px 0 0;font-size:12.5px;color:var(--ink-dim);cursor:pointer;border:1px solid var(--line);border-bottom:none;background:var(--bg-panel);}
+.chat-tabs{display:flex;gap:4px;padding:10px 14px 0;flex:none;overflow-x:auto;scrollbar-width:none;}
+.chat-tabs::-webkit-scrollbar{display:none;}
+.chat-tab{padding:7px 12px;border-radius:8px 8px 0 0;font-size:12.5px;color:var(--ink-dim);cursor:pointer;border:1px solid var(--line);border-bottom:none;background:var(--bg-panel);white-space:nowrap;flex:none;}
 .chat-tab.active{color:var(--ink);background:var(--bg-panel-2);font-weight:700;}
 .chat-tab.locked{opacity:.35;cursor:not-allowed;}
 
@@ -275,11 +300,12 @@ select.field{appearance:none;}
 
 .dm-panel{background:var(--bg-panel-2);border:1px solid var(--line);border-radius:10px;padding:12px;}
 .dm-title{font-size:12px;color:var(--ink-dim);letter-spacing:.08em;margin-bottom:8px;display:flex;justify-content:space-between;align-items:center;}
-.dm-thread-list{display:flex;flex-direction:column;gap:4px;max-height:120px;overflow-y:auto;}
+.dm-thread-list{display:flex;flex-direction:column;gap:4px;max-height:140px;overflow-y:auto;}
 .dm-thread{padding:6px 8px;border-radius:6px;cursor:pointer;font-size:12.5px;color:var(--ink-dim);}
 .dm-thread.active{background:var(--bg);color:var(--ink);}
 
 .banner{background:rgba(178,58,72,.14);border:1px solid var(--wolf);color:#ff9aa4;padding:10px 18px;font-size:12.5px;flex:none;}
+.spectator-banner{background:rgba(124,156,196,.14);border:1px solid var(--seer);color:#a9c6e8;padding:10px 18px;font-size:12.5px;flex:none;}
 .result-title{font-family:var(--serif);font-size:30px;font-weight:800;text-align:center;margin:18px 0 6px;}
 .center{text-align:center;}
 .muted{color:var(--ink-dim);font-size:13px;}
@@ -288,11 +314,11 @@ select.field{appearance:none;}
 .link{color:var(--seer);font-size:12px;cursor:pointer;text-decoration:underline;}
 .modal-overlay{position:fixed;inset:0;background:rgba(6,7,12,.86);display:flex;align-items:center;justify-content:center;z-index:900;padding:20px;}
 .modal-overlay.hidden{display:none;}
-.modal-box{background:var(--bg-panel);border:1px solid var(--line);border-radius:var(--radius);padding:22px;max-width:440px;width:100%;max-height:80vh;overflow-y:auto;}
+.modal-box{background:var(--bg-panel);border:1px solid var(--line);border-radius:var(--radius);padding:22px;max-width:460px;width:100%;max-height:80vh;overflow-y:auto;}
 .role-info-item{border-bottom:1px solid var(--line);padding:12px 0;}
 .role-info-item:last-child{border-bottom:none;}
 .role-info-item b{font-family:var(--serif);}
-.checkline{display:flex;align-items:center;gap:8px;margin-top:14px;font-size:13px;}
+.role-info-item .fac{font-size:11px;color:var(--ink-dim);letter-spacing:.08em;}
 .debug-box{margin-top:12px;background:var(--bg);border:1px solid var(--line);border-radius:10px;padding:10px;max-height:220px;overflow-y:auto;font-size:11px;color:var(--ink-dim);font-family:monospace;white-space:pre-wrap;word-break:break-all;}
 .card-overlay{position:fixed;inset:0;background:rgba(6,7,12,.94);display:flex;flex-direction:column;align-items:center;justify-content:center;z-index:950;padding:20px;text-align:center;}
 .role-card{width:220px;height:310px;perspective:1200px;cursor:pointer;}
@@ -301,7 +327,7 @@ select.field{appearance:none;}
 .role-card-face{position:absolute;inset:0;backface-visibility:hidden;border-radius:16px;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:20px;}
 .role-card-front{background:linear-gradient(135deg,#1d2133,#0d0f16);border:1px solid var(--line);font-family:var(--serif);font-size:40px;color:var(--ink-dim);}
 .role-card-back{background:linear-gradient(135deg,var(--bg-panel-2),var(--bg));border:2px solid var(--village);transform:rotateY(180deg);}
-.role-card-back .rn{font-family:var(--serif);font-size:26px;font-weight:800;margin-bottom:10px;}
+.role-card-back .rn{font-family:var(--serif);font-size:24px;font-weight:800;margin-bottom:10px;}
 .card-hint{color:var(--ink-dim);font-size:13px;margin-top:18px;}
 
 .mention-pop{position:absolute;bottom:52px;left:18px;background:var(--bg-panel-2);border:1px solid var(--line);border-radius:8px;overflow:hidden;z-index:50;min-width:160px;box-shadow:0 8px 24px rgba(0,0,0,.4);}
@@ -339,7 +365,7 @@ select.field{appearance:none;}
         <button class="btn" onclick="startJoinFlow('official')">公式部屋に参加する</button>
         <button class="btn" onclick="startJoinFlow('create')">部屋を作成する</button>
         <button class="btn" onclick="startJoinFlow('list')">既存の部屋に参加する</button>
-        <div class="link" style="margin-top:14px;display:inline-block" onclick="openRoleInfo()">役職について見る</div>
+        <div class="link" style="margin-top:14px;display:inline-block" onclick="openRoleInfo()">役職について見る（全13種）</div>
       </div>
     </div></div>
   </div>
@@ -356,19 +382,15 @@ select.field{appearance:none;}
         <div class="row2">
           <div>
             <div class="label">最大人数</div>
-            <input id="maxPlayersInput" type="number" class="field" min="3" max="16" value="8">
+            <input id="maxPlayersInput" type="number" class="field" min="5" max="20" value="10">
           </div>
           <div>
-            <div class="label">Botの数</div>
-            <input id="botCountInput" type="number" class="field" min="0" max="8" value="0">
+            <div class="label">Botの数（空欄で自動）</div>
+            <input id="botCountInput" type="number" class="field" min="0" max="19" placeholder="自動">
           </div>
         </div>
-        <div class="label">Botの強さ</div>
-        <select id="botLevelInput" class="field">
-          <option value="1">弱い</option>
-          <option value="2" selected>普通</option>
-          <option value="3">強い</option>
-        </select>
+        <div class="label">パスワード（任意・空欄なら誰でも参加可）</div>
+        <input id="roomPasswordInput" class="field" type="text" maxlength="20" placeholder="設定しない場合は空欄">
         <button class="btn primary" style="margin-top:16px" onclick="proceedToName('create')">次へ（表示名を決める）</button>
         <div id="createError" class="errtext"></div>
       </div>
@@ -392,6 +414,8 @@ select.field{appearance:none;}
       <div class="panel">
         <div class="eyebrow">表示名を決める</div>
         <div class="muted" id="nameEntryRoomLabel" style="margin-bottom:6px"></div>
+        <div class="label" id="pwLabel" style="display:none">この部屋のパスワード</div>
+        <input id="roomPasswordJoinInput" class="field" type="text" maxlength="20" placeholder="パスワード" style="display:none">
         <div class="label">表示名（この部屋の中で重複できません）</div>
         <input id="nameInput" class="field" maxlength="12" placeholder="村人A" onkeydown="if(event.key==='Enter')confirmNameAndJoin()">
         <button class="btn primary" style="margin-top:16px" onclick="confirmNameAndJoin()">この名前で入室する</button>
@@ -406,6 +430,7 @@ select.field{appearance:none;}
     <div class="center-wrap"><div class="center-col">
       <div class="panel">
         <div class="eyebrow" id="lobbyRoomName">部屋</div>
+        <div class="muted" id="lobbySpecNote" style="margin-bottom:8px"></div>
         <div class="player-list" id="lobbyPlayers"></div>
         <button class="btn primary" id="startBtn" style="margin-top:18px;display:none" onclick="hostStartGame()">ゲームを開始する</button>
         <div class="muted" id="lobbyWaitNote" style="margin-top:10px"></div>
@@ -490,10 +515,8 @@ select.field{appearance:none;}
 
 <div class="modal-overlay hidden" id="roleInfoModal">
   <div class="modal-box">
-    <div class="eyebrow">役職について</div>
-    <div class="role-info-item"><b>人狼</b><div class="muted">夜になると仲間の人狼と同時に、村人の中から1人を選んで襲撃できます。役職者専用チャットで仲間とだけ相談できます。人狼の数が人狼以外の生存者数以上になれば人狼陣営の勝利です。</div></div>
-    <div class="role-info-item"><b>占い師</b><div class="muted">夜になると1人を選び、その人が人狼かどうかを知ることができます。結果を元に翌日の議論をリードしましょう。</div></div>
-    <div class="role-info-item"><b>村人</b><div class="muted">特別な能力はありません。話し合いと投票で人狼を見つけ出しましょう。</div></div>
+    <div class="eyebrow">役職について（全13種）</div>
+    <div id="roleInfoList"></div>
     <button class="btn ghost" style="margin-top:8px" onclick="closeRoleInfo()">閉じる</button>
   </div>
 </div>
@@ -519,19 +542,33 @@ const sb = supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
 
 const ROOM_PREFIX = "JinrouOnlineRoom";
 const OFFICIAL_KEY = ROOM_PREFIX + "Official";
-const MIN_PLAYERS = 3;
-const NIGHT_MS = 45000;
+const MIN_PLAYERS = 5;
+const NIGHT_MS = 60000;
 const DAY_MS = 45000;
 const VOTE_MS = 20000;
 const PRESENCE_STALE_MS = 20000;
 
+/* ---------- 役職定義（13種） ---------- */
 const ROLE_INFO = {
-  werewolf: { label: '人狼', desc: '夜に仲間と1人を選んで襲撃できます。人狼の数が他の生存者数以上になれば勝利です。' },
-  seer: { label: '占い師', desc: '夜に1人を選び、人狼かどうかを知ることができます。' },
-  villager: { label: '村人', desc: '特別な能力はありません。議論と投票で人狼を見つけましょう。' }
+  villager:  { label:'村人',     team:'village', desc:'特殊能力を持たない一般市民。昼の議論と投票だけで人狼を追い詰める。' },
+  seer:      { label:'占い師',   team:'village', desc:'毎夜、生存者の中から1人を選び、その正体が「人間」か「人狼」かを知ることができる。' },
+  medium:    { label:'霊媒師',   team:'village', desc:'毎夜、その日の昼に処刑されたプレイヤーの正体が「人間」か「人狼」かを知ることができる。' },
+  knight:    { label:'騎士（狩人）', team:'village', desc:'毎夜、自分以外のプレイヤー1人を選び、人狼の襲撃から守ることができる。' },
+  mason:     { label:'共有者',   team:'village', desc:'2人1組の役職。お互いが村人（人間）であることを最初から知っている。' },
+  catghost:  { label:'猫又',     team:'village', desc:'処刑されるとランダムで生存者1人を道連れにし、人狼に襲撃されると襲撃してきた人狼を1人道連れにする。' },
+  twin:      { label:'双子',     team:'village', desc:'2人1組の役職。片方が死亡すると、もう片方も後を追って死亡する。' },
+  werewolf:  { label:'人狼',     team:'wolf', desc:'毎夜、人狼同士で相談し、村人側のプレイヤーを1人襲撃して殺害できる。' },
+  madman:    { label:'狂人',     team:'wolf', desc:'人狼を勝利させるために動く人間。特殊能力はなく、誰が人狼かも知らされていない。' },
+  fanatic:   { label:'狂信者',   team:'wolf', desc:'狂人の上位互換。特殊能力はないが、ゲーム開始時に誰が人狼であるかを最初から知っている。' },
+  direwolf:  { label:'大狼',     team:'wolf', desc:'占い師や霊媒師に占われた際、人狼であるにもかかわらず「人間（白）」と判定される人狼。' },
+  fox:       { label:'妖狐',     team:'third', desc:'人狼に襲撃されても死なないが、占い師に占われると死亡する。ゲーム終了時に生き残っていれば単独勝利となる。' },
+  teruteru:  { label:'てるてる坊主', team:'third', desc:'昼の投票で自分が処刑されることを目指す。処刑された瞬間に単独勝利となる。' }
 };
+const TEAM_LABEL = { village:'村人陣営', wolf:'人狼陣営', third:'第三陣営' };
+function isWolfSideJudgedAsWolf(role){ return role==='werewolf' || role==='madman' && false || role==='fanatic' && false; }
+function isSeenAsWerewolf(role){ return role==='werewolf'; } // direwolf, fox等は白判定/対象外は個別処理
 
-const BOT_NAMES = ['クロ','ミライ','ソラ','つむぎ','はやぶさ','かなで','しずく','ゆき','あかね','りん','ノア','ヒカリ'];
+const BOT_NAMES = ['クロ','ミライ','ソラ','つむぎ','はやぶさ','かなで','しずく','ゆき','あかね','りん','ノア','ヒカリ','レン','ミサキ','トウカ'];
 
 const BOT_TEMPLATES = {
   1: ['なんとなく{target}が怪しい気がする…', 'わからないよ〜', '多数決で決めよう', '{target}、ちょっと静かすぎない?'],
@@ -550,12 +587,17 @@ function generateGameTag(){
   return w1 + w2 + num;
 }
 
+async function sha256Hex(text){
+  const enc = new TextEncoder().encode(text);
+  const buf = await crypto.subtle.digest('SHA-256', enc);
+  return Array.from(new Uint8Array(buf)).map(b=>b.toString(16).padStart(2,'0')).join('');
+}
+
 /* ---------- state ---------- */
 let clientId = "";
 let myName = "";
 let roomKey = "";
 let roomName = "";
-let pendingCreateSettings = null;
 let joinIntent = null;
 
 let room = null;
@@ -563,6 +605,8 @@ let players = [];
 let messages = [];
 let myRole = null;
 let seerResult = null;
+let mediumResult = null;
+let amSpectator = false;
 
 let roomChannel = null;
 let playersChannel = null;
@@ -571,6 +615,7 @@ let presenceTimer = null;
 let tickTimer = null;
 let advanceLock = false;
 let botTimer = null;
+let gmTimer = null;
 
 let selectedTarget = null;
 let selectedVote = null;
@@ -591,14 +636,12 @@ function uuid(){
     return v.toString(16);
   });
 }
-
 function loadLocal(key, fallback){
   try{ const v = localStorage.getItem(key); return v !== null ? JSON.parse(v) : fallback; }catch(e){ return fallback; }
 }
 function saveLocal(key, value){
   try{ localStorage.setItem(key, JSON.stringify(value)); }catch(e){}
 }
-
 (function initLocal(){
   clientId = loadLocal('jinro_client_id', null);
   if(!clientId){ clientId = uuid(); saveLocal('jinro_client_id', clientId); }
@@ -613,7 +656,6 @@ function debugLog(kind, msg){
   saveLocal('jinro_debug_logs', debugLogs);
   renderDebugPanel();
 }
-
 function openSettings(){
   document.getElementById('debugToggle').checked = !!settings.debugMode;
   document.getElementById('debugSection').style.display = settings.debugMode ? 'block' : 'none';
@@ -639,29 +681,48 @@ function copyDebugLogs(){
   if(navigator.clipboard) navigator.clipboard.writeText(text);
 }
 
-function openRoleInfo(){ document.getElementById('roleInfoModal').classList.remove('hidden'); }
+function openRoleInfo(){
+  const wrap = document.getElementById('roleInfoList');
+  wrap.innerHTML = '';
+  ['village','wolf','third'].forEach(team=>{
+    const header = document.createElement('div');
+    header.className = 'label';
+    header.style.marginTop = '10px';
+    header.textContent = TEAM_LABEL[team];
+    wrap.appendChild(header);
+    Object.entries(ROLE_INFO).filter(([k,v])=>v.team===team).forEach(([k,v])=>{
+      const item = document.createElement('div');
+      item.className = 'role-info-item';
+      item.innerHTML = '<b>' + escapeHtml(v.label) + '</b><div class="muted">' + escapeHtml(v.desc) + '</div>';
+      wrap.appendChild(item);
+    });
+  });
+  document.getElementById('roleInfoModal').classList.remove('hidden');
+}
 function closeRoleInfo(){ document.getElementById('roleInfoModal').classList.add('hidden'); }
 
 function showScreen(id){
   document.querySelectorAll('.screen').forEach(s=>s.classList.remove('active'));
   document.getElementById(id).classList.add('active');
 }
-
 function escapeHtml(s){
   return (s || '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 }
 
-/* ---------- 画面遷移: メニュー → (作成なら設定) → 名前入力 → 部屋 ---------- */
+/* ---------- 画面遷移 ---------- */
 
 function startJoinFlow(kind){
   if(kind === 'official'){
     joinIntent = { kind:'official', key: OFFICIAL_KEY, name: '公式部屋', createSettings: null };
     document.getElementById('nameEntryRoomLabel').textContent = '公式部屋 に参加します';
+    document.getElementById('pwLabel').style.display = 'none';
+    document.getElementById('roomPasswordJoinInput').style.display = 'none';
     document.getElementById('nameInput').value = loadLocal('jinro_name','');
     document.getElementById('nameError').textContent = '';
     showScreen('screen-nameentry');
   }else if(kind === 'create'){
     regenRoomName();
+    document.getElementById('roomPasswordInput').value = '';
     showScreen('screen-create');
   }else if(kind === 'list'){
     showScreen('screen-roomlist');
@@ -678,14 +739,17 @@ async function proceedToName(kind){
     const key = ROOM_PREFIX + document.getElementById('createRoomInput').value.trim();
     const errEl = document.getElementById('createError');
     errEl.textContent = '';
-    const maxPlayers = Math.max(MIN_PLAYERS, parseInt(document.getElementById('maxPlayersInput').value,10) || 8);
-    const botCount = Math.max(0, parseInt(document.getElementById('botCountInput').value,10) || 0);
-    const botLevel = parseInt(document.getElementById('botLevelInput').value,10) || 2;
+    const maxPlayers = Math.max(5, Math.min(20, parseInt(document.getElementById('maxPlayersInput').value,10) || 10));
+    const botRaw = document.getElementById('botCountInput').value;
+    const botCount = botRaw === '' ? -1 : Math.max(0, parseInt(botRaw,10) || 0);
+    const password = document.getElementById('roomPasswordInput').value.trim();
     const { data, error } = await sb.from('rooms').select('room_key').eq('room_key', key).maybeSingle();
     if(error){ debugLog('error','部屋確認に失敗: '+error.message); }
     if(data){ errEl.textContent = 'その部屋名は既に使用されています。再生成してください'; return; }
-    joinIntent = { kind:'create', key, name: document.getElementById('createRoomInput').value.trim(), createSettings: { maxPlayers, botCount, botLevel } };
+    joinIntent = { kind:'create', key, name: document.getElementById('createRoomInput').value.trim(), createSettings: { maxPlayers, botCount, password } };
     document.getElementById('nameEntryRoomLabel').textContent = '「' + joinIntent.name + '」を作成して参加します';
+    document.getElementById('pwLabel').style.display = 'none';
+    document.getElementById('roomPasswordJoinInput').style.display = 'none';
     document.getElementById('nameInput').value = loadLocal('jinro_name','');
     document.getElementById('nameError').textContent = '';
     showScreen('screen-nameentry');
@@ -708,20 +772,23 @@ async function refreshRoomList(){
   }
   const counts = {};
   await Promise.all(active.map(async r=>{
-    const { count } = await sb.from('room_players').select('*', { count:'exact', head:true }).eq('room_key', r.room_key);
+    const { count } = await sb.from('room_players').select('*', { count:'exact', head:true }).eq('room_key', r.room_key).eq('is_bot', false).eq('is_spectator', false);
     counts[r.room_key] = count || 0;
   }));
   body.innerHTML = '';
   active.forEach(r=>{
     const row = document.createElement('div');
     row.className = 'room-row';
-    row.innerHTML = '<div><div class="room-name">' + escapeHtml(r.room_name) + '</div><div class="room-meta">' + (counts[r.room_key]||0) + '人参加中・フェーズ: ' + phaseLabel(r.phase) + '</div></div>';
+    row.innerHTML = '<div><div class="room-name">' + (r.password_hash ? '<span class="lock">🔒</span>' : '') + escapeHtml(r.room_name) + '</div><div class="room-meta">' + (counts[r.room_key]||0) + '人参加中・フェーズ: ' + phaseLabel(r.phase) + '</div></div>';
     const btn = document.createElement('button');
     btn.className = 'btn small';
     btn.textContent = '参加';
     btn.onclick = ()=>{
-      joinIntent = { kind:'join', key: r.room_key, name: r.room_name, createSettings: null };
+      joinIntent = { kind:'join', key: r.room_key, name: r.room_name, createSettings: null, needsPassword: !!r.password_hash };
       document.getElementById('nameEntryRoomLabel').textContent = '「' + r.room_name + '」に参加します';
+      document.getElementById('pwLabel').style.display = r.password_hash ? 'block' : 'none';
+      document.getElementById('roomPasswordJoinInput').style.display = r.password_hash ? 'block' : 'none';
+      document.getElementById('roomPasswordJoinInput').value = '';
       document.getElementById('nameInput').value = loadLocal('jinro_name','');
       document.getElementById('nameError').textContent = '';
       showScreen('screen-nameentry');
@@ -745,11 +812,13 @@ async function confirmNameAndJoin(){
   const key = joinIntent.key;
 
   if(joinIntent.kind === 'create'){
+    let pwHash = null;
+    if(joinIntent.createSettings.password) pwHash = await sha256Hex(joinIntent.createSettings.password);
     const { error: roomErr } = await sb.from('rooms').insert({
       room_key: key, room_name: joinIntent.name, is_official: false,
       max_players: joinIntent.createSettings.maxPlayers,
       bot_count: joinIntent.createSettings.botCount,
-      bot_level: joinIntent.createSettings.botLevel,
+      password_hash: pwHash,
       phase: 'lobby', round: 0, state: {}
     });
     if(roomErr && roomErr.code !== '23505'){
@@ -757,10 +826,22 @@ async function confirmNameAndJoin(){
       debugLog('error', '部屋作成失敗: ' + roomErr.message);
       return;
     }
+    if(!roomErr){
+      await sb.from('room_players').insert({ room_key:key, client_id:'gm_'+key, name:'ゲームマスター', is_bot:true, bot_kind:'gm', alive:true, is_spectator:false });
+    }
   }else if(joinIntent.kind === 'official'){
     const { data: existing } = await sb.from('rooms').select('room_key').eq('room_key', key).maybeSingle();
     if(!existing){
-      await sb.from('rooms').insert({ room_key: key, room_name: '公式部屋', is_official: true, max_players: 16, bot_count: 0, bot_level: 1, phase: 'lobby', round: 0, state: {} });
+      await sb.from('rooms').insert({ room_key: key, room_name: '公式部屋', is_official: true, max_players: 16, bot_count: -1, password_hash:null, phase: 'lobby', round: 0, state: {} });
+      await sb.from('room_players').insert({ room_key:key, client_id:'gm_'+key, name:'ゲームマスター', is_bot:true, bot_kind:'gm', alive:true, is_spectator:false });
+    }
+  }else if(joinIntent.kind === 'join' && joinIntent.needsPassword){
+    const { data: roomRowChk } = await sb.from('rooms').select('password_hash').eq('room_key', key).maybeSingle();
+    const pw = document.getElementById('roomPasswordJoinInput').value;
+    const hash = pw ? await sha256Hex(pw) : null;
+    if(!roomRowChk || roomRowChk.password_hash !== hash){
+      errEl.textContent = 'パスワードが正しくありません';
+      return;
     }
   }
 
@@ -770,22 +851,23 @@ async function confirmNameAndJoin(){
     debugLog('error', '部屋取得失敗: ' + (roomFetchErr ? roomFetchErr.message : 'not found'));
     return;
   }
-  if(roomRow.phase !== 'lobby'){
-    errEl.textContent = 'この部屋は現在ゲーム進行中のため入室できません';
-    return;
-  }
 
-  const { data: existingPlayers } = await sb.from('room_players').select('name,client_id').eq('room_key', key);
+  const { data: existingPlayers } = await sb.from('room_players').select('name,client_id,is_bot,is_spectator').eq('room_key', key);
   const nameTaken = (existingPlayers||[]).some(p => p.name === name && p.client_id !== clientId);
   if(nameTaken){
     errEl.textContent = 'その表示名は既にこの部屋で使われています。別の名前にしてください';
     return;
   }
   const myExisting = (existingPlayers||[]).find(p=>p.client_id===clientId);
-  const humanCount = (existingPlayers||[]).filter(p=>!myExisting || p.client_id!==clientId).length;
-  if(!myExisting && humanCount >= (roomRow.max_players || 8)){
-    errEl.textContent = 'この部屋は満員です';
-    return;
+  const humanNonSpec = (existingPlayers||[]).filter(p=>!p.is_bot && !p.is_spectator && p.client_id!==clientId).length;
+
+  let becomeSpectator = false;
+  if(!myExisting){
+    if(roomRow.phase !== 'lobby'){
+      becomeSpectator = true;
+    }else if(humanNonSpec >= (roomRow.max_players || 10)){
+      becomeSpectator = true;
+    }
   }
 
   myName = name;
@@ -797,13 +879,13 @@ async function confirmNameAndJoin(){
     const { error: upErr } = await sb.from('room_players').update({ name, last_seen: new Date().toISOString() }).eq('room_key', key).eq('client_id', clientId);
     if(upErr){ errEl.textContent = '入室に失敗しました'; debugLog('error','update失敗:'+upErr.message); return; }
   }else{
-    const { error: insErr } = await sb.from('room_players').insert({ room_key: key, client_id: clientId, name, is_bot: false, alive: true });
+    const { error: insErr } = await sb.from('room_players').insert({ room_key: key, client_id: clientId, name, is_bot: false, alive: true, is_spectator: becomeSpectator });
     if(insErr){
       errEl.textContent = insErr.code === '23505' ? 'その表示名は既に使われています' : '入室に失敗しました';
       debugLog('error','insert失敗:'+insErr.message);
       return;
     }
-    debugLog('ok', '部屋に入室しました: ' + key);
+    debugLog('ok', '部屋に入室しました: ' + key + (becomeSpectator?'（観戦者として）':''));
   }
 
   await enterRoomRuntime();
@@ -826,10 +908,11 @@ async function refreshRoomFull(){
   const { data: ps, error: pErr } = await sb.from('room_players').select('*').eq('room_key', roomKey).order('joined_at', { ascending:true });
   if(pErr){ debugLog('error','players取得失敗:'+pErr.message); }
   players = ps || players || [];
-  const { data: msgs, error: mErr } = await sb.from('room_messages').select('*').eq('room_key', roomKey).order('id', { ascending:true }).limit(300);
+  const { data: msgs, error: mErr } = await sb.from('room_messages').select('*').eq('room_key', roomKey).order('id', { ascending:true }).limit(400);
   if(mErr){ debugLog('error','messages取得失敗:'+mErr.message); }
   messages = msgs || messages || [];
   const me = players.find(p=>p.client_id===clientId);
+  amSpectator = me ? !!me.is_spectator : false;
   if(me && me.role) myRole = me.role; else if(!me) myRole = null;
 }
 
@@ -850,7 +933,7 @@ function subscribeRealtime(){
     .subscribe(status=>{ if(status==='SUBSCRIBED') debugLog('ok','roomsチャンネル購読開始'); else if(status==='CHANNEL_ERROR') debugLog('error','roomsチャンネル購読エラー'); });
 
   playersChannel = sb.channel('players-' + roomKey)
-    .on('postgres_changes', { event:'*', schema:'public', table:'room_players', filter:'room_key=eq.' + roomKey }, async payload=>{
+    .on('postgres_changes', { event:'*', schema:'public', table:'room_players', filter:'room_key=eq.' + roomKey }, async ()=>{
       await refreshPlayersOnly();
       renderCurrentScreen();
     })
@@ -859,23 +942,22 @@ function subscribeRealtime(){
   messagesChannel = sb.channel('messages-' + roomKey)
     .on('postgres_changes', { event:'INSERT', schema:'public', table:'room_messages', filter:'room_key=eq.' + roomKey }, payload=>{
       messages.push(payload.new);
-      if(messages.length > 400) messages.shift();
+      if(messages.length > 500) messages.shift();
       renderChatArea();
     })
     .subscribe(status=>{ if(status==='SUBSCRIBED') debugLog('ok','messagesチャンネル購読開始'); else if(status==='CHANNEL_ERROR') debugLog('error','messagesチャンネル購読エラー'); });
 }
-
 function unsubscribeRealtime(){
   if(roomChannel){ sb.removeChannel(roomChannel); roomChannel = null; }
   if(playersChannel){ sb.removeChannel(playersChannel); playersChannel = null; }
   if(messagesChannel){ sb.removeChannel(messagesChannel); messagesChannel = null; }
 }
-
 async function refreshPlayersOnly(){
   const { data: ps, error } = await sb.from('room_players').select('*').eq('room_key', roomKey).order('joined_at', { ascending:true });
   if(error){ debugLog('error','players再取得失敗:'+error.message); return; }
   players = ps || [];
   const me = players.find(p=>p.client_id===clientId);
+  amSpectator = me ? !!me.is_spectator : amSpectator;
   if(me && me.role && me.role !== myRole){ setMyRole(me.role); }
 }
 
@@ -891,15 +973,13 @@ function startPresenceHeartbeat(){
 function onRoomUpdated(prevPhase){
   if(prevPhase !== room.phase){
     routeToPhaseScreen();
-    if(room.phase === 'night' && !room.state.round1BotKillDone){
-      /* host-less client-side trigger for first-night bot kill handled in ensureRound1BotKill */
+    if(room.phase === 'lobby' && prevPhase && prevPhase !== 'lobby'){
+      promoteSpectatorsIfHost();
     }
   }
-  ensureRound1BotKill();
   scheduleBotBehavior();
   renderCurrentScreen();
 }
-
 function routeToPhaseScreen(){
   if(!room) return;
   if(room.phase === 'lobby'){ showScreen('screen-lobby'); }
@@ -908,17 +988,17 @@ function routeToPhaseScreen(){
   renderCurrentScreen();
 }
 
-/* ---------- 楽観的アドバンス（進行トリガー） ---------- */
+/* ---------- GM Bot: 進行専任の楽観的アドバンス ---------- */
 
 async function checkPhaseTimeout(){
   if(!room || advanceLock) return;
   if(room.phase === 'lobby' || room.phase === 'ended') return;
   if(!room.phase_end_at) return;
   if(Date.now() < new Date(room.phase_end_at).getTime()) return;
-  await tryAdvancePhase();
+  await gmTryAdvancePhase();
 }
 
-async function tryAdvancePhase(){
+async function gmTryAdvancePhase(){
   if(advanceLock) return;
   advanceLock = true;
   try{
@@ -932,7 +1012,7 @@ async function tryAdvancePhase(){
     else if(expectedPhase === 'day') await startVotePhase();
     else if(expectedPhase === 'vote') await resolveVote();
   }catch(e){
-    debugLog('error','進行処理でエラー: ' + e.message);
+    debugLog('error','GM Bot進行処理でエラー: ' + e.message);
   }
   advanceLock = false;
 }
@@ -942,31 +1022,33 @@ async function tryAdvancePhase(){
 function renderLobby(){
   if(!room) return;
   document.getElementById('lobbyRoomName').textContent = roomName;
+  document.getElementById('lobbySpecNote').textContent = amSpectator ? 'あなたは観戦者として入室しています。次のゲーム開始時にプレイヤーへ昇格します。' : '';
   const list = document.getElementById('lobbyPlayers');
   list.innerHTML = '';
-  players.forEach(p=>{
+  players.filter(p=>p.bot_kind!=='gm').forEach(p=>{
     const row = document.createElement('div');
-    row.className = 'p-row' + (p.client_id===clientId ? ' me' : '');
-    row.innerHTML = '<span class="nm">' + escapeHtml(p.name) + (p.is_bot ? ' 🤖' : '') + '</span>';
+    row.className = 'p-row' + (p.client_id===clientId ? ' me' : '') + (p.is_spectator ? ' spectator' : '');
+    row.innerHTML = '<span class="nm">' + escapeHtml(p.name) + (p.is_bot ? ' 🤖' : '') + (p.is_spectator ? '（観戦）' : '') + '</span>';
     list.appendChild(row);
   });
   const startBtn = document.getElementById('startBtn');
   const waitNote = document.getElementById('lobbyWaitNote');
-  const total = players.length + (room.bot_count || 0);
-  const amFirst = players.length > 0 && players[0].client_id === clientId;
+  const humanPlayers = players.filter(p=>!p.is_bot && !p.is_spectator);
+  const amFirst = humanPlayers.length > 0 && humanPlayers[0].client_id === clientId;
+  const total = humanPlayers.length + Math.max(0, (room.bot_count!==undefined && room.bot_count>=0) ? room.bot_count : (humanPlayers.length<5 ? 4 : 0));
   if(amFirst){
     startBtn.style.display = 'block';
-    startBtn.disabled = total < MIN_PLAYERS;
-    waitNote.textContent = total < MIN_PLAYERS ? ('開始には最低' + MIN_PLAYERS + '人必要です（Bot込み）') : 'あなた（最初の参加者）が開始できます';
+    startBtn.disabled = false;
+    waitNote.textContent = 'あなた（最初の参加者）が開始できます';
   }else{
     startBtn.style.display = 'none';
     waitNote.textContent = '最初の参加者の開始を待っています…';
   }
   renderLobbyLog();
 }
-
 function renderLobbyLog(){
   const el = document.getElementById('lobbyLog');
+  if(!el) return;
   el.innerHTML = '';
   messages.filter(m=>m.channel==='lobby').slice(-60).forEach(m=>{
     const line = document.createElement('div');
@@ -977,51 +1059,110 @@ function renderLobbyLog(){
   el.scrollTop = el.scrollHeight;
 }
 
+async function promoteSpectatorsIfHost(){
+  const humanPlayers = players.filter(p=>!p.is_bot);
+  const amFirst = humanPlayers.length>0 && humanPlayers.filter(p=>!p.is_spectator)[0] && humanPlayers.filter(p=>!p.is_spectator)[0].client_id===clientId;
+  if(!amFirst && !(humanPlayers.length>0 && humanPlayers[0].client_id===clientId)) return;
+  const { data: cur } = await sb.from('room_players').select('*').eq('room_key', roomKey).eq('is_spectator', true).eq('is_bot', false);
+  if(!cur || cur.length===0) return;
+  await sb.from('room_players').update({ is_spectator:false }).eq('room_key', roomKey).eq('is_spectator', true).eq('is_bot', false);
+  debugLog('ok', '観戦者をプレイヤーへ昇格しました');
+}
+
+function pickBotRoleCount(n){
+  const wolfCount = Math.max(1, Math.floor(n/4) + (n>=8?1:0));
+  return wolfCount;
+}
+
 async function hostStartGame(){
-  const amFirst = players.length > 0 && players[0].client_id === clientId;
+  const humanPlayers = players.filter(p=>!p.is_bot && !p.is_spectator);
+  const amFirst = humanPlayers.length > 0 && humanPlayers[0].client_id === clientId;
   if(!amFirst) return;
-  const botCount = room.bot_count || 0;
-  const total = players.length + botCount;
+
+  let botCount = (room.bot_count !== undefined && room.bot_count !== null && room.bot_count >= 0) ? room.bot_count : -1;
+  if(botCount < 0){
+    if(humanPlayers.length >= 5){
+      botCount = 0;
+    }else{
+      const targetTotal = Math.max(5, Math.min(20, Math.round(8 + Math.random()*4)));
+      botCount = Math.max(0, targetTotal - humanPlayers.length);
+    }
+  }
+  const total = humanPlayers.length + botCount;
   if(total < MIN_PLAYERS) return;
 
-  const bots = spawnBots(botCount, room.bot_level || 2);
+  const bots = spawnRoleBots(botCount);
   if(bots.length){
-    await sb.from('room_players').insert(bots.map(b=>({ room_key: roomKey, client_id: b.client_id, name: b.name, is_bot: true, bot_level: b.bot_level, alive: true })));
+    await sb.from('room_players').insert(bots.map(b=>({ room_key: roomKey, client_id: b.client_id, name: b.name, is_bot: true, bot_kind:'role', bot_level: b.bot_level, alive: true, is_spectator:false })));
   }
-  const { data: allPlayers } = await sb.from('room_players').select('*').eq('room_key', roomKey);
-  const ids = allPlayers.map(p=>p.client_id);
+
+  const { data: allPlayers } = await sb.from('room_players').select('*').eq('room_key', roomKey).eq('is_bot', false).or('is_bot.eq.true,is_bot.eq.false');
+  const { data: rosterAll } = await sb.from('room_players').select('*').eq('room_key', roomKey);
+  const roster = (rosterAll||[]).filter(p=>p.bot_kind !== 'gm' && !p.is_spectator);
+
+  const ids = roster.map(p=>p.client_id);
   for(let i=ids.length-1;i>0;i--){ const j=Math.floor(Math.random()*(i+1)); [ids[i],ids[j]]=[ids[j],ids[i]]; }
   const n = ids.length;
-  const wolfCount = Math.max(1, Math.floor(n/3));
-  const seerCount = n >= 4 ? 1 : 0;
-  const roleMap = {};
-  ids.forEach((id,i)=>{
-    if(i < wolfCount) roleMap[id] = 'werewolf';
-    else if(i < wolfCount + seerCount) roleMap[id] = 'seer';
-    else roleMap[id] = 'villager';
+  const roleMap = assignRoles(ids, n);
+
+  const twinIds = ids.filter(id=>roleMap[id]==='twin');
+  const masonIds = ids.filter(id=>roleMap[id]==='mason');
+  const fanaticIds = ids.filter(id=>roleMap[id]==='fanatic');
+  const wolfIds = ids.filter(id=>roleMap[id]==='werewolf'||roleMap[id]==='direwolf');
+
+  const updates = ids.map((id,i)=>{
+    const upd = { role: roleMap[id], alive:true, seat_order: i, twin_group: null };
+    if(roleMap[id]==='twin' && twinIds.length===2) upd.twin_group = 'twin_pair';
+    if(roleMap[id]==='mason' && masonIds.length===2) upd.twin_group = 'mason_pair';
+    return sb.from('room_players').update(upd).eq('room_key', roomKey).eq('client_id', id);
   });
-  await Promise.all(Object.entries(roleMap).map(([id,role])=>
-    sb.from('room_players').update({ role, alive:true }).eq('room_key', roomKey).eq('client_id', id)
-  ));
+  await Promise.all(updates);
 
   await postMessage('lobby', null, null, null, null, null, 'ゲームが始まりました');
   await sb.from('rooms').update({
     phase: 'night', round: 1,
     phase_end_at: new Date(Date.now() + NIGHT_MS).toISOString(),
-    state: { nightActions: {}, votes: {}, round1BotKillDone: false, deaths: [] },
+    state: {
+      nightActions: {}, votes: {}, deaths: [],
+      seatOrder: ids, wolfIds, fanaticIds, medium_last_executed: null
+    },
     updated_at: new Date().toISOString()
   }).eq('room_key', roomKey);
   await postMessage('alive', null, null, null, null, null, '1日目の夜になりました');
 }
 
-function spawnBots(count, level){
+function assignRoles(ids, n){
+  const roleMap = {};
+  let pool = [];
+  const wolfCount = Math.max(1, Math.floor(n/4) + (n>=8?1:0));
+  const thirdEnabled = n >= 6;
+  for(let i=0;i<wolfCount;i++) pool.push('werewolf');
+  if(n>=6) pool.push('madman');
+  if(n>=9) pool.push('fanatic');
+  if(n>=12 && wolfCount>=2){ pool.pop(); pool.push('direwolf'); }
+  pool.push('seer');
+  if(n>=7) pool.push('medium');
+  if(n>=6) pool.push('knight');
+  if(n>=8){ pool.push('mason'); pool.push('mason'); }
+  if(n>=10) pool.push('catghost');
+  if(thirdEnabled) pool.push('fox');
+  if(n>=9) pool.push('teruteru');
+  if(n>=12 && pool.filter(r=>r!=='villager').length < n){ pool.push('twin'); pool.push('twin'); }
+  while(pool.length < n) pool.push('villager');
+  pool = pool.slice(0, n);
+  for(let i=pool.length-1;i>0;i--){ const j=Math.floor(Math.random()*(i+1)); [pool[i],pool[j]]=[pool[j],pool[i]]; }
+  ids.forEach((id,i)=>{ roleMap[id] = pool[i]; });
+  return roleMap;
+}
+
+function spawnRoleBots(count){
   const used = new Set(players.map(p=>p.name));
   const bots = [];
   for(let i=0;i<count;i++){
-    let name;
-    let tries = 0;
+    let name, tries=0;
     do{ name = BOT_NAMES[Math.floor(Math.random()*BOT_NAMES.length)] + (tries>0?tries:''); tries++; }while(used.has(name) && tries<20);
     used.add(name);
+    const level = 1 + Math.floor(Math.random()*3);
     bots.push({ client_id: 'bot_' + uuid(), name, bot_level: level });
   }
   return bots;
@@ -1029,25 +1170,14 @@ function spawnBots(count, level){
 
 /* ---------- 夜/昼/投票 進行 ---------- */
 
-function aliveWolves(){ return players.filter(p=>p.alive && p.role==='werewolf'); }
-function aliveSeers(){ return players.filter(p=>p.alive && p.role==='seer'); }
-
-async function ensureRound1BotKill(){
-  if(!room || room.phase !== 'night') return;
-  if(room.round !== 1) return;
-  if(room.state && room.state.round1BotKillDone) return;
-  const amFirst = players.length > 0 && players.filter(p=>!p.is_bot)[0] && players.filter(p=>!p.is_bot)[0].client_id === clientId;
-  if(!amFirst) return;
-  const { data: cur } = await sb.from('rooms').select('state,phase,round').eq('room_key', roomKey).maybeSingle();
-  if(!cur || cur.phase !== 'night' || cur.round !== 1 || (cur.state && cur.state.round1BotKillDone)) return;
-  const newState = Object.assign({}, cur.state, { round1BotKillDone: true });
-  await sb.from('rooms').update({ state: newState }).eq('room_key', roomKey).eq('phase','night').eq('round',1);
-}
+function aliveOf(role){ return players.filter(p=>p.alive && p.role===role); }
+function aliveWolvesAndDire(){ return players.filter(p=>p.alive && (p.role==='werewolf'||p.role==='direwolf')); }
 
 async function handleNightAction(targetId){
   const me = players.find(p=>p.client_id===clientId);
-  if(!me || !me.alive || room.phase !== 'night') return;
-  if(me.role !== 'werewolf' && me.role !== 'seer') return;
+  if(!me || !me.alive || room.phase !== 'night' || amSpectator) return;
+  const actingRoles = ['werewolf','direwolf','seer','medium','knight'];
+  if(!actingRoles.includes(me.role)) return;
   const { data: cur } = await sb.from('rooms').select('state').eq('room_key', roomKey).maybeSingle();
   const state = cur ? cur.state : room.state;
   state.nightActions = state.nightActions || {};
@@ -1058,16 +1188,31 @@ async function handleNightAction(targetId){
   if(me.role === 'seer'){
     const targetP = players.find(p=>p.client_id===targetId);
     if(targetP){
-      seerResult = { target: targetP.name, isWerewolf: targetP.role === 'werewolf' };
+      const isWolf = targetP.role === 'werewolf';
+      const isFox = targetP.role === 'fox';
+      seerResult = { target: targetP.name, isWerewolf: isWolf, isFox };
+      if(isFox){
+        await sb.from('room_players').update({ alive:false }).eq('room_key', roomKey).eq('client_id', targetId);
+        await postMessage('alive', null, null, null, null, null, '占いの結果、' + targetP.name + ' は静かに息を引き取りました');
+      }
       renderCurrentScreen();
     }
   }
+  if(me.role === 'medium'){
+    const lastExec = (room.state && room.state.medium_last_executed) || null;
+    if(lastExec){
+      const targetP = players.find(p=>p.client_id===lastExec);
+      if(targetP){ mediumResult = { target: targetP.name, isWerewolf: targetP.role==='werewolf' }; renderCurrentScreen(); }
+    }
+  }
 
-  const wolves = aliveWolves().map(p=>p.client_id);
-  const seers = aliveSeers().map(p=>p.client_id);
+  const wolves = aliveWolvesAndDire().map(p=>p.client_id);
+  const seers = aliveOf('seer').map(p=>p.client_id);
+  const knights = aliveOf('knight').map(p=>p.client_id);
   const allWolvesActed = wolves.every(id=> state.nightActions[id]);
   const allSeersActed = seers.every(id=> state.nightActions[id]);
-  if(allWolvesActed && allSeersActed) await tryAdvancePhase();
+  const allKnightsActed = knights.every(id=> state.nightActions[id]);
+  if(allWolvesActed && allSeersActed && allKnightsActed) await gmTryAdvancePhase();
 }
 
 async function resolveNight(){
@@ -1075,31 +1220,59 @@ async function resolveNight(){
   if(!cur || cur.phase !== 'night') return;
   const state = cur.state || {};
   const actions = state.nightActions || {};
+  const { data: currentPlayers } = await sb.from('room_players').select('*').eq('room_key', roomKey);
+
   const tally = {};
-  Object.values(actions).forEach(a=>{ if(a.role==='werewolf') tally[a.target] = (tally[a.target]||0)+1; });
+  Object.values(actions).forEach(a=>{ if(a.role==='werewolf'||a.role==='direwolf') tally[a.target] = (tally[a.target]||0)+1; });
   let killTarget = null, max = 0;
   Object.entries(tally).forEach(([id,c])=>{ if(c>max){ max=c; killTarget=id; } });
 
-  const { data: currentPlayers } = await sb.from('room_players').select('*').eq('room_key', roomKey);
-
-  if(cur.round === 1){
-    const aliveBots = currentPlayers.filter(p=>p.is_bot && p.alive);
-    if(aliveBots.length > 0) killTarget = aliveBots[Math.floor(Math.random()*aliveBots.length)].client_id;
-  }
+  let guardedId = null;
+  Object.values(actions).forEach(a=>{ if(a.role==='knight') guardedId = a.target; });
 
   const deaths = [];
-  if(killTarget){
+  let cascadeMsgs = [];
+
+  if(killTarget && killTarget !== guardedId){
     const victim = currentPlayers.find(p=>p.client_id===killTarget);
-    if(victim){
-      await sb.from('room_players').update({ alive:false }).eq('room_key', roomKey).eq('client_id', killTarget);
-      deaths.push(victim.name);
+    if(victim && victim.alive){
+      if(victim.role === 'catghost'){
+        await sb.from('room_players').update({ alive:false }).eq('room_key', roomKey).eq('client_id', killTarget);
+        deaths.push(victim.name);
+        const wolfActorIds = Object.entries(actions).filter(([id,a])=>(a.role==='werewolf'||a.role==='direwolf') && a.target===killTarget).map(([id])=>id);
+        if(wolfActorIds.length){
+          const doomed = wolfActorIds[Math.floor(Math.random()*wolfActorIds.length)];
+          const doomedP = currentPlayers.find(p=>p.client_id===doomed);
+          if(doomedP){
+            await sb.from('room_players').update({ alive:false }).eq('room_key', roomKey).eq('client_id', doomed);
+            deaths.push(doomedP.name);
+            cascadeMsgs.push('猫又が道連れにしました');
+          }
+        }
+      }else{
+        await sb.from('room_players').update({ alive:false }).eq('room_key', roomKey).eq('client_id', killTarget);
+        deaths.push(victim.name);
+      }
+    }
+  }
+
+  const updatedPlayers = currentPlayers.map(p=> deaths.includes(p.name) ? Object.assign({},p,{alive:false}) : p);
+  for(const p of updatedPlayers){
+    if(!p.alive && p.twin_group === 'twin_pair'){
+      const partner = updatedPlayers.find(x=>x.twin_group==='twin_pair' && x.client_id!==p.client_id && x.alive);
+      if(partner){
+        await sb.from('room_players').update({ alive:false }).eq('room_key', roomKey).eq('client_id', partner.client_id);
+        deaths.push(partner.name);
+        cascadeMsgs.push('双子の後を追いました');
+      }
     }
   }
 
   await postMessage('alive', null, null, null, null, null, deaths.length ? (deaths.join('、') + ' が無残な姿で見つかりました') : '今夜、犠牲者はいませんでした');
+  cascadeMsgs.forEach(async m=> await postMessage('alive', null, null, null, null, null, m));
 
-  const updatedPlayers = currentPlayers.map(p=> p.client_id===killTarget ? Object.assign({},p,{alive:false}) : p);
-  const winner = computeWinner(updatedPlayers);
+  const finalPlayers = currentPlayers.map(p=> deaths.includes(p.name) ? Object.assign({},p,{alive:false}) : p);
+  const winner = computeWinner(finalPlayers);
   if(winner){ await endGame(winner); return; }
 
   await sb.from('rooms').update({
@@ -1122,15 +1295,15 @@ async function startVotePhase(){
 
 async function handleVote(targetId){
   const me = players.find(p=>p.client_id===clientId);
-  if(!me || !me.alive || room.phase !== 'vote') return;
+  if(!me || !me.alive || room.phase !== 'vote' || amSpectator) return;
   const { data: cur } = await sb.from('rooms').select('state').eq('room_key', roomKey).maybeSingle();
   const state = cur ? cur.state : room.state;
   state.votes = state.votes || {};
   state.votes[clientId] = targetId;
   await sb.from('rooms').update({ state, updated_at: new Date().toISOString() }).eq('room_key', roomKey);
   room.state = state;
-  const aliveCount = players.filter(p=>p.alive).length;
-  if(Object.keys(state.votes).length >= aliveCount) await tryAdvancePhase();
+  const aliveCount = players.filter(p=>p.alive && p.bot_kind!=='gm').length;
+  if(Object.keys(state.votes).length >= aliveCount) await gmTryAdvancePhase();
 }
 
 async function resolveVote(){
@@ -1146,59 +1319,105 @@ async function resolveVote(){
   });
   const { data: currentPlayers } = await sb.from('room_players').select('*').eq('room_key', roomKey);
   let updatedPlayers = currentPlayers;
+  let executedId = null;
+  let teruteruWin = false;
+  let cascadeDeaths = [];
+
   if(top && !tie){
     const executed = currentPlayers.find(p=>p.client_id===top);
     if(executed){
       await sb.from('room_players').update({ alive:false }).eq('room_key', roomKey).eq('client_id', top);
+      executedId = top;
       await postMessage('alive', null, null, null, null, null, executed.name + ' が処刑されました');
       updatedPlayers = currentPlayers.map(p=> p.client_id===top ? Object.assign({},p,{alive:false}) : p);
+      if(executed.role === 'teruteru'){
+        teruteruWin = true;
+      }
+      if(executed.role === 'catghost'){
+        const others = updatedPlayers.filter(p=>p.alive && p.client_id!==executed.client_id);
+        if(others.length){
+          const doomed = others[Math.floor(Math.random()*others.length)];
+          await sb.from('room_players').update({ alive:false }).eq('room_key', roomKey).eq('client_id', doomed.client_id);
+          cascadeDeaths.push(doomed.name);
+          updatedPlayers = updatedPlayers.map(p=> p.client_id===doomed.client_id ? Object.assign({},p,{alive:false}) : p);
+        }
+      }
+      if(executed.twin_group === 'twin_pair'){
+        const partner = updatedPlayers.find(p=>p.twin_group==='twin_pair' && p.client_id!==executed.client_id && p.alive);
+        if(partner){
+          await sb.from('room_players').update({ alive:false }).eq('room_key', roomKey).eq('client_id', partner.client_id);
+          cascadeDeaths.push(partner.name);
+          updatedPlayers = updatedPlayers.map(p=> p.client_id===partner.client_id ? Object.assign({},p,{alive:false}) : p);
+        }
+      }
     }
   }else{
     await postMessage('alive', null, null, null, null, null, '票が割れたため、処刑は行われませんでした');
   }
+
+  for(const nm of cascadeDeaths){ await postMessage('alive', null, null, null, null, null, nm + 'が後を追いました'); }
+
+  if(teruteruWin){
+    await postMessage('alive', null, null, null, null, null, 'てるてる坊主が処刑され、単独勝利を果たしました');
+    await sb.from('rooms').update({ phase:'ended', state: Object.assign({}, state, { winner:'teruteru' }) }).eq('room_key', roomKey);
+    return;
+  }
+
   const winner = computeWinner(updatedPlayers);
   if(winner){ await endGame(winner); return; }
+
   await sb.from('rooms').update({
     phase: 'night', round: (cur.round||1) + 1,
     phase_end_at: new Date(Date.now() + NIGHT_MS).toISOString(),
-    state: { nightActions: {}, votes: {}, round1BotKillDone: true, deaths: [] }
+    state: Object.assign({}, state, { nightActions:{}, votes:{}, deaths: [], medium_last_executed: executedId })
   }).eq('room_key', roomKey).eq('phase','vote');
-  await postMessage('alive', null, null, null, null, null, (cur.round||1)+1 + '日目の夜になりました');
+  await postMessage('alive', null, null, null, null, null, ((cur.round||1)+1) + '日目の夜になりました');
 }
 
 function computeWinner(playerList){
-  const alive = playerList.filter(p=>p.alive);
-  const wolves = alive.filter(p=>p.role==='werewolf');
-  const others = alive.filter(p=>p.role!=='werewolf');
-  if(!playerList.some(p=>p.role)) return null;
-  if(wolves.length === 0) return 'village';
-  if(wolves.length >= others.length) return 'wolf';
+  const real = playerList.filter(p=>p.bot_kind !== 'gm');
+  if(!real.some(p=>p.role)) return null;
+  const alive = real.filter(p=>p.alive);
+  const fox = alive.find(p=>p.role==='fox');
+  const wolves = alive.filter(p=>p.role==='werewolf'||p.role==='direwolf');
+  const others = alive.filter(p=>p.role!=='werewolf' && p.role!=='direwolf' && p.role!=='fox');
+  if(wolves.length === 0 && !fox){
+    return 'village';
+  }
+  if(wolves.length >= others.length + (fox?1:0)){
+    if(fox) return 'fox_dead_wolf_win';
+    return 'wolf';
+  }
   return null;
 }
 
 async function endGame(winner){
-  await postMessage('alive', null, null, null, null, null, winner==='wolf' ? '人狼の勝利です' : '村人陣営の勝利です');
+  let msg = '村人陣営の勝利です';
+  if(winner==='wolf' || winner==='fox_dead_wolf_win') msg = '人狼陣営の勝利です';
+  await postMessage('alive', null, null, null, null, null, msg);
   await sb.from('rooms').update({ phase:'ended', state: Object.assign({}, room.state, { winner }) }).eq('room_key', roomKey);
 }
 
 async function backToLobbyScreen(){
-  const amFirst = players.filter(p=>!p.is_bot).length>0 && players.filter(p=>!p.is_bot)[0].client_id===clientId;
+  const humanPlayers = players.filter(p=>!p.is_bot && !p.is_spectator);
+  const amFirst = humanPlayers.length>0 && humanPlayers[0].client_id===clientId;
   if(amFirst){
-    await sb.from('room_players').delete().eq('room_key', roomKey).eq('is_bot', true);
-    await sb.from('room_players').update({ alive:true, role:null }).eq('room_key', roomKey);
+    await sb.from('room_players').delete().eq('room_key', roomKey).eq('is_bot', true).eq('bot_kind','role');
+    await sb.from('room_players').update({ alive:true, role:null, twin_group:null, seat_order:null }).eq('room_key', roomKey).neq('bot_kind','gm');
     await sb.from('rooms').update({ phase:'lobby', round:0, phase_end_at:null, state:{} }).eq('room_key', roomKey);
     await postMessage('lobby', null, null, null, null, null, 'ロビーに戻りました');
   }
-  myRole = null; seerResult = null; revealPending = false;
+  myRole = null; seerResult = null; mediumResult = null; revealPending = false;
   showScreen('screen-lobby');
 }
 
-/* ---------- Bot AI ---------- */
+/* ---------- 役職Bot AI（GM Botとは別レイヤー） ---------- */
 
 function scheduleBotBehavior(){
   clearTimeout(botTimer);
   if(!room) return;
-  const amFirst = players.filter(p=>!p.is_bot).length>0 && players.filter(p=>!p.is_bot)[0].client_id===clientId;
+  const humanPlayers = players.filter(p=>!p.is_bot && !p.is_spectator);
+  const amFirst = humanPlayers.length>0 && humanPlayers[0].client_id===clientId;
   if(!amFirst) return;
   if(room.phase === 'night') scheduleBotNightActions();
   else if(room.phase === 'day') scheduleBotChat();
@@ -1206,9 +1425,9 @@ function scheduleBotBehavior(){
 }
 
 function scheduleBotNightActions(){
-  const bots = players.filter(p=>p.is_bot && p.alive && (p.role==='werewolf'||p.role==='seer'));
+  const bots = players.filter(p=>p.is_bot && p.bot_kind==='role' && p.alive && ['werewolf','direwolf','seer','medium','knight'].includes(p.role));
   bots.forEach(bot=>{
-    const delay = 2000 + Math.random()*10000;
+    const delay = 2000 + Math.random()*15000;
     const t = setTimeout(async ()=>{
       const { data: cur } = await sb.from('rooms').select('phase,state').eq('room_key', roomKey).maybeSingle();
       if(!cur || cur.phase !== 'night') return;
@@ -1216,32 +1435,34 @@ function scheduleBotNightActions(){
       state.nightActions = state.nightActions || {};
       if(state.nightActions[bot.client_id]) return;
       let pool = players.filter(p=>p.alive && p.client_id!==bot.client_id);
-      if(bot.role==='werewolf') pool = pool.filter(p=>p.role!=='werewolf');
+      if(bot.role==='werewolf'||bot.role==='direwolf') pool = pool.filter(p=>p.role!=='werewolf' && p.role!=='direwolf');
       if(pool.length===0) return;
       const target = pool[Math.floor(Math.random()*pool.length)];
-      if(bot.role==='werewolf' && Math.random()<0.5){
+      if((bot.role==='werewolf'||bot.role==='direwolf') && Math.random()<0.5){
         const line = BOT_WOLF_TALK[Math.floor(Math.random()*BOT_WOLF_TALK.length)].replace('{target}', target.name);
         await postMessage('wolves', bot.client_id, bot.name, null, null, null, line);
       }
       state.nightActions[bot.client_id] = { role: bot.role, target: target.client_id };
       await sb.from('rooms').update({ state }).eq('room_key', roomKey);
-      const wolves = players.filter(p=>p.alive && p.role==='werewolf').map(p=>p.client_id);
+      const wolves = players.filter(p=>p.alive && (p.role==='werewolf'||p.role==='direwolf')).map(p=>p.client_id);
       const seers = players.filter(p=>p.alive && p.role==='seer').map(p=>p.client_id);
+      const knights = players.filter(p=>p.alive && p.role==='knight').map(p=>p.client_id);
       const allW = wolves.every(id=>state.nightActions[id]);
       const allS = seers.every(id=>state.nightActions[id]);
-      if(allW && allS) await tryAdvancePhase();
+      const allK = knights.every(id=>state.nightActions[id]);
+      if(allW && allS && allK) await gmTryAdvancePhase();
     }, delay);
     botTimer = t;
   });
 }
 
 function scheduleBotChat(){
-  const bots = players.filter(p=>p.is_bot && p.alive);
+  const bots = players.filter(p=>p.is_bot && p.bot_kind==='role' && p.alive);
   if(bots.length===0) return;
   const fire = async ()=>{
     const { data: cur } = await sb.from('rooms').select('phase').eq('room_key', roomKey).maybeSingle();
     if(!cur || cur.phase !== 'day') return;
-    const alive = players.filter(p=>p.alive);
+    const alive = players.filter(p=>p.alive && p.bot_kind!=='gm');
     const speaker = bots[Math.floor(Math.random()*bots.length)];
     if(!speaker.alive){ scheduleNext(); return; }
     const level = speaker.bot_level || 1;
@@ -1265,7 +1486,7 @@ function scheduleBotChat(){
 }
 
 function scheduleBotVotes(){
-  const bots = players.filter(p=>p.is_bot && p.alive);
+  const bots = players.filter(p=>p.is_bot && p.bot_kind==='role' && p.alive);
   bots.forEach(bot=>{
     const delay = 2000 + Math.random()*10000;
     const t = setTimeout(async ()=>{
@@ -1274,20 +1495,20 @@ function scheduleBotVotes(){
       const state = cur.state || {};
       state.votes = state.votes || {};
       if(state.votes[bot.client_id]) return;
-      let pool = players.filter(p=>p.alive && p.client_id!==bot.client_id);
+      let pool = players.filter(p=>p.alive && p.client_id!==bot.client_id && p.bot_kind!=='gm');
       if((bot.bot_level||1)>=2) pool = pool.filter(p=>p.role!=='werewolf').concat(pool.filter(p=>p.role==='werewolf' && Math.random()<0.2));
-      if(pool.length===0) pool = players.filter(p=>p.alive && p.client_id!==bot.client_id);
+      if(pool.length===0) pool = players.filter(p=>p.alive && p.client_id!==bot.client_id && p.bot_kind!=='gm');
       const target = pool[Math.floor(Math.random()*pool.length)];
       state.votes[bot.client_id] = target.client_id;
       await sb.from('rooms').update({ state }).eq('room_key', roomKey);
-      const aliveCount = players.filter(p=>p.alive).length;
-      if(Object.keys(state.votes).length >= aliveCount) await tryAdvancePhase();
+      const aliveCount = players.filter(p=>p.alive && p.bot_kind!=='gm').length;
+      if(Object.keys(state.votes).length >= aliveCount) await gmTryAdvancePhase();
     }, delay);
     botTimer = t;
   });
 }
 
-/* ---------- チャット/DM/メンション/返信 ---------- */
+/* ---------- チャット/DM/囁き/メンション/返信 ---------- */
 
 async function postMessage(channel, fromId, fromName, toId, replyTo, mentions, text){
   const { error } = await sb.from('room_messages').insert({
@@ -1297,13 +1518,30 @@ async function postMessage(channel, fromId, fromName, toId, replyTo, mentions, t
   if(error) debugLog('error','メッセージ送信失敗: '+error.message);
 }
 
+function neighborIds(){
+  const me = players.find(p=>p.client_id===clientId);
+  if(!me || me.seat_order===undefined || me.seat_order===null) return [];
+  const seat = (room.state && room.state.seatOrder) || [];
+  if(seat.length===0) return [];
+  const idx = seat.indexOf(clientId);
+  if(idx===-1) return [];
+  const prev = seat[(idx-1+seat.length)%seat.length];
+  const next = seat[(idx+1)%seat.length];
+  return [prev,next].filter(id=>{
+    const p = players.find(x=>x.client_id===id);
+    return p && p.alive;
+  });
+}
+
 function currentAvailableTabs(){
   const me = players.find(p=>p.client_id===clientId);
   const amAlive = me ? me.alive : true;
   const tabs = [];
   if(room && room.phase === 'lobby'){ return [{ id:'lobby', label:'ロビー' }]; }
   tabs.push({ id: amAlive ? 'alive':'dead', label: amAlive ? '生存者':'死亡者' });
-  if(me && (me.role==='werewolf') && me.alive) tabs.push({ id:'wolves', label:'人狼専用' });
+  if(me && (me.role==='werewolf'||me.role==='direwolf') && me.alive) tabs.push({ id:'wolves', label:'人狼専用' });
+  if(me && me.alive && me.role!=='fox' && neighborIds().length>0 && (room.phase==='day')) tabs.push({ id:'whisper', label:'囁き（隣人）' });
+  if(me && me.twin_group && me.alive) tabs.push({ id:'pair', label: me.role==='mason'?'共有者トーク':'双子トーク' });
   return tabs;
 }
 
@@ -1323,8 +1561,11 @@ function renderChatTabs(){
 
 function channelIsLocked(){
   if(!room) return false;
+  if(amSpectator) return true;
   if(room.phase === 'lobby') return false;
   if(activeChatTab === 'wolves') return room.phase !== 'night';
+  if(activeChatTab === 'whisper') return room.phase !== 'day';
+  if(activeChatTab === 'pair') return false;
   return room.phase === 'night';
 }
 
@@ -1335,11 +1576,25 @@ function renderMentionText(text){
   });
 }
 
+function visibleMessagesForChannel(chan){
+  if(chan==='whisper'){
+    const nb = new Set(neighborIds());
+    nb.add(clientId);
+    return messages.filter(m=> m.channel==='whisper' && nb.has(m.from_id) );
+  }
+  if(chan==='pair'){
+    const me = players.find(p=>p.client_id===clientId);
+    if(!me || !me.twin_group) return [];
+    const groupIds = new Set(players.filter(p=>p.twin_group===me.twin_group).map(p=>p.client_id));
+    return messages.filter(m=>m.channel==='pair' && groupIds.has(m.from_id));
+  }
+  return messages.filter(m=>m.channel===chan);
+}
+
 function renderChatArea(){
   renderChatTabs();
-  const el = document.getElementById('gameLog') || document.getElementById('lobbyLog');
   const targetChan = activeChatTab;
-  const list = messages.filter(m=>m.channel===targetChan);
+  const list = visibleMessagesForChannel(targetChan);
   if(document.getElementById('gameLog')){
     const logEl = document.getElementById('gameLog');
     logEl.innerHTML = '';
@@ -1395,7 +1650,6 @@ function onChatInputChange(){
 function onChatKeydown(e){
   if(e.key==='Enter'){ document.getElementById('mentionPop').classList.add('hidden'); sendChat('gameChatInput'); }
 }
-
 function setReply(msg){
   replyTarget = msg;
   const bar = document.getElementById('replyBar');
@@ -1408,6 +1662,7 @@ function clearReply(){
 }
 
 async function sendChat(inputId){
+  if(amSpectator) return;
   const input = document.getElementById(inputId);
   const text = input.value.trim();
   if(!text) return;
@@ -1424,8 +1679,8 @@ function renderDMThreads(){
   const wrap = document.getElementById('dmThreadList');
   if(!wrap) return;
   wrap.innerHTML = '';
-  const others = players.filter(p=>p.client_id!==clientId);
-  const me = players.find(p=>p.client_id===clientId);
+  if(amSpectator){ wrap.innerHTML = '<div class="muted" style="font-size:12px">観戦者はDMできません</div>'; return; }
+  const others = players.filter(p=>p.client_id!==clientId && p.bot_kind!=='gm');
   others.forEach(p=>{
     const t = document.createElement('div');
     t.className = 'dm-thread' + (dmSelectedId===p.client_id?' active':'');
@@ -1434,7 +1689,6 @@ function renderDMThreads(){
     wrap.appendChild(t);
   });
 }
-
 function openDMFor(p){
   const existingBar = document.getElementById('dmModalOverlay');
   if(existingBar) existingBar.remove();
@@ -1484,16 +1738,15 @@ function openDMFor(p){
 function setMyRole(role){
   const isNew = myRole !== role;
   myRole = role;
-  seerResult = null;
+  seerResult = null; mediumResult = null;
   if(isNew){ revealPending = true; revealFlipped = false; }
   renderCurrentScreen();
 }
-
 function flipRoleCard(){
   if(revealFlipped) return;
   revealFlipped = true;
   document.getElementById('roleCard').classList.add('flipped');
-  const info = ROLE_INFO[myRole] || { label:'村人', desc:'' };
+  const info = ROLE_INFO[myRole] || ROLE_INFO.villager;
   document.getElementById('cardRoleName').textContent = info.label;
   document.getElementById('cardRoleDesc').textContent = info.desc;
   document.getElementById('cardHint').style.display = 'none';
@@ -1510,7 +1763,7 @@ function renderRoleCardOverlay(){
   document.getElementById('cardHint').style.display = revealFlipped ? 'none' : 'block';
   document.getElementById('cardStartBtn').style.display = revealFlipped ? 'block' : 'none';
   if(revealFlipped){
-    const info = ROLE_INFO[myRole] || { label:'村人', desc:'' };
+    const info = ROLE_INFO[myRole] || ROLE_INFO.villager;
     document.getElementById('cardRoleName').textContent = info.label;
     document.getElementById('cardRoleDesc').textContent = info.desc;
   }
@@ -1528,10 +1781,22 @@ function renderCurrentScreen(){
   if(active.id==='screen-result') renderResult();
 }
 
+function roleTeamClass(role){
+  const info = ROLE_INFO[role];
+  if(!info) return 'village-team';
+  return info.team + '-team';
+}
+
 function renderGame(){
   if(!room) return;
-  if(revealPending){ renderRoleCardOverlay(); return; }
+  if(revealPending && !amSpectator){ renderRoleCardOverlay(); return; }
   document.getElementById('cardOverlay').classList.add('hidden');
+
+  if(amSpectator){
+    showBanner('gameBanner', 'あなたは観戦者です。次のロビーでプレイヤーへ昇格します。');
+  }else{
+    clearBanner('gameBanner');
+  }
 
   document.getElementById('phaseTitle').textContent = room.phase==='night'?'夜':room.phase==='day'?'昼・議論':'投票';
   clearInterval(tickTimer);
@@ -1544,11 +1809,11 @@ function renderGame(){
   }, 250);
 
   const badgeWrap = document.getElementById('roleBadgeWrap');
-  if(myRole){
+  if(myRole && !amSpectator){
     const info = ROLE_INFO[myRole];
-    badgeWrap.innerHTML = '<div class="role-badge ' + myRole + '">' + info.label + '</div><div class="muted" style="margin-top:6px">' + info.desc + '</div>';
+    badgeWrap.innerHTML = '<div class="role-badge ' + roleTeamClass(myRole) + '">' + info.label + '（' + TEAM_LABEL[info.team] + '）</div><div class="role-desc-box">' + info.desc + '</div>';
   }else{
-    badgeWrap.innerHTML = '';
+    badgeWrap.innerHTML = amSpectator ? '<div class="muted">観戦中</div>' : '';
   }
 
   const me = players.find(p=>p.client_id===clientId);
@@ -1556,35 +1821,48 @@ function renderGame(){
   const actionArea = document.getElementById('actionArea');
   actionArea.innerHTML = '';
 
-  if(!amAlive){
-    actionArea.innerHTML = '<div class="muted">あなたは脱落しました。死亡者チャットで見守りましょう。</div>';
-  }else if(room.phase==='night' && (myRole==='werewolf'||myRole==='seer')){
-    const label = myRole==='werewolf' ? '襲撃する相手を選んでください（夜の間に完結します）' : '占う相手を選んでください';
+  if(amSpectator){
+    actionArea.innerHTML = '<div class="muted">観戦中です。行動や投票はできません。</div>';
+  }else if(!amAlive){
+    actionArea.innerHTML = '<div class="muted">あなたは脱落しました。死亡者チャットで見守りましょう。全員の正体が確認できます。</div>';
+  }else if(room.phase==='night' && ['werewolf','direwolf','seer','medium','knight'].includes(myRole)){
+    const labelMap = {
+      werewolf:'襲撃する相手を選んでください', direwolf:'襲撃する相手を選んでください',
+      seer:'占う相手を選んでください', medium:'（霊媒結果は昼に処刑者があれば自動表示されます）',
+      knight:'守る相手を選んでください'
+    };
     const wrap = document.createElement('div');
-    wrap.innerHTML = '<div class="label" style="margin-top:0">' + label + '</div>';
-    const list = document.createElement('div');
-    list.className = 'target-list';
-    const state = room.state || {};
-    const already = (state.nightActions||{})[clientId];
-    players.filter(p=>p.alive && p.client_id!==clientId).forEach(p=>{
-      if(myRole==='werewolf' && p.role==='werewolf') return;
-      const row = document.createElement('div');
-      row.className = 'target' + (selectedTarget===p.client_id||(already&&already.target===p.client_id)?' selected':'');
-      row.textContent = p.name;
-      row.onclick = async ()=>{
-        selectedTarget = p.client_id;
-        await handleNightAction(p.client_id);
-        renderGame();
-      };
-      list.appendChild(row);
-    });
-    wrap.appendChild(list);
+    wrap.innerHTML = '<div class="label" style="margin-top:0">' + labelMap[myRole] + '</div>';
+    if(myRole!=='medium'){
+      const list = document.createElement('div');
+      list.className = 'target-list';
+      const state = room.state || {};
+      const already = (state.nightActions||{})[clientId];
+      players.filter(p=>p.alive && p.client_id!==clientId && p.bot_kind!=='gm').forEach(p=>{
+        if((myRole==='werewolf'||myRole==='direwolf') && (p.role==='werewolf'||p.role==='direwolf')) return;
+        const row = document.createElement('div');
+        row.className = 'target' + (selectedTarget===p.client_id||(already&&already.target===p.client_id)?' selected':'');
+        row.textContent = p.name;
+        row.onclick = async ()=>{
+          selectedTarget = p.client_id;
+          await handleNightAction(p.client_id);
+          renderGame();
+        };
+        list.appendChild(row);
+      });
+      wrap.appendChild(list);
+    }
     actionArea.appendChild(wrap);
     if(myRole==='seer' && seerResult){
       const r = document.createElement('div');
-      r.className = 'muted';
-      r.style.marginTop = '10px';
-      r.textContent = '占い結果：' + seerResult.target + ' は ' + (seerResult.isWerewolf?'人狼':'人狼ではない');
+      r.className = 'muted'; r.style.marginTop = '10px';
+      r.textContent = '占い結果：' + seerResult.target + ' は ' + (seerResult.isFox ? '妖狐（死亡しました）' : (seerResult.isWerewolf?'人狼':'人狼ではない'));
+      actionArea.appendChild(r);
+    }
+    if(myRole==='medium' && mediumResult){
+      const r = document.createElement('div');
+      r.className = 'muted'; r.style.marginTop = '10px';
+      r.textContent = '霊媒結果：' + mediumResult.target + ' は ' + (mediumResult.isWerewolf?'人狼だった':'人狼ではなかった');
       actionArea.appendChild(r);
     }
   }else if(room.phase==='night'){
@@ -1598,7 +1876,7 @@ function renderGame(){
     list.className = 'target-list';
     const state = room.state || {};
     const already = (state.votes||{})[clientId];
-    players.filter(p=>p.alive).forEach(p=>{
+    players.filter(p=>p.alive && p.bot_kind!=='gm').forEach(p=>{
       const row = document.createElement('div');
       row.className = 'target' + (selectedVote===p.client_id||already===p.client_id?' selected':'');
       row.textContent = p.name + (p.client_id===clientId?'（自分）':'');
@@ -1615,11 +1893,18 @@ function renderGame(){
 
   const list = document.getElementById('gamePlayers');
   list.innerHTML = '';
-  players.forEach(p=>{
+  const showAllRoles = !amAlive || amSpectator;
+  players.filter(p=>p.bot_kind!=='gm').forEach(p=>{
     const row = document.createElement('div');
     row.className = 'p-row' + (p.client_id===clientId?' me':'') + (!p.alive?' dead':'');
     row.innerHTML = '<span class="nm">' + escapeHtml(p.name) + (p.is_bot?' 🤖':'') + '</span>';
-    if(p.client_id!==clientId && p.alive && room.phase!=='night'){
+    if(showAllRoles && p.role){
+      const rv = document.createElement('span');
+      rv.className = 'revealed';
+      rv.textContent = ROLE_INFO[p.role] ? ROLE_INFO[p.role].label : p.role;
+      row.appendChild(rv);
+    }
+    if(p.client_id!==clientId && p.alive && room.phase!=='night' && !amSpectator){
       const mtn = document.createElement('button');
       mtn.className = 'mtn-btn';
       mtn.textContent = '@';
@@ -1643,8 +1928,11 @@ function renderGame(){
 
 function renderResult(){
   const win = room.state && room.state.winner;
-  document.getElementById('resultTitle').textContent = win==='wolf' ? '人狼の勝利' : '村人陣営の勝利';
-  const roleLines = players.map(p=> p.name + '：' + (ROLE_INFO[p.role] ? ROLE_INFO[p.role].label : '村人'));
+  let title = '村人陣営の勝利';
+  if(win==='wolf'||win==='fox_dead_wolf_win') title = '人狼陣営の勝利';
+  if(win==='teruteru') title = 'てるてる坊主の単独勝利';
+  document.getElementById('resultTitle').textContent = title;
+  const roleLines = players.filter(p=>p.bot_kind!=='gm').map(p=> p.name + '：' + (ROLE_INFO[p.role] ? ROLE_INFO[p.role].label : '村人'));
   document.getElementById('resultSub').textContent = roleLines.join(' ／ ');
 }
 
@@ -1667,17 +1955,16 @@ async function leaveRoom(){
   unsubscribeRealtime();
   try{
     await sb.from('room_players').delete().eq('room_key', roomKey).eq('client_id', clientId);
-    const { count } = await sb.from('room_players').select('*', { count:'exact', head:true }).eq('room_key', roomKey);
+    const { count } = await sb.from('room_players').select('*', { count:'exact', head:true }).eq('room_key', roomKey).neq('bot_kind','gm');
     if((count||0) === 0 && roomKey !== OFFICIAL_KEY){
       await sb.from('rooms').delete().eq('room_key', roomKey);
     }
   }catch(e){ debugLog('error','退出処理エラー: ' + e.message); }
   hardResetToMenu();
 }
-
 function hardResetToMenu(){
   roomKey=''; roomName=''; room=null; players=[]; messages=[];
-  myRole=null; seerResult=null; revealPending=false;
+  myRole=null; seerResult=null; mediumResult=null; revealPending=false; amSpectator=false;
   activeChatTab='lobby'; dmSelectedId=null; replyTarget=null;
   leavingIntentionally = false;
   document.getElementById('topRoomTag').textContent = '';
