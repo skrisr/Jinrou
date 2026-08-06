@@ -8,6 +8,234 @@
 <link href="https://fonts.googleapis.com/css2?family=Shippori+Mincho:wght@500;700;800&family=Zen+Kaku+Gothic+New:wght@400;500;700&display=swap" rel="stylesheet">
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <style>
+/*
+============================================================
+ 仕様書 / カスタム指示（第4版：13役職・GM Bot・観戦・パスワード対応）
+============================================================
+
+■ 第4版の追加・変更要件（原文ベース）
+  1. 役職を13種に拡張する。
+     村人陣営: 村人／占い師／霊媒師／騎士（狩人）／共有者(2人1組)／
+               猫又／双子(2人1組)
+     人狼陣営: 人狼／狂人／狂信者(人狼を最初から知る狂人上位互換)／
+               大狼(占い・霊媒で人間判定される人狼)
+     第三陣営: 妖狐(人狼襲撃無効・占いで死亡・生存で単独勝利)／
+               てるてる坊主(処刑されると単独勝利。死者は全員の正体が
+               見える)
+  2. 囁き（ささやき）機能：ゲーム開始時に生存者をランダムに円形に
+     着席させ、隣（両隣）の人にだけ囁ける専用チャンネルを持つ。
+  3. チャットは「相手（チャンネル）をスライドタブで横に切り替え」、
+     「発言はテキスト自由入力」の両対応にする。
+  4. 人狼・狂人（および狂信者・大狼など人狼陣営の一部）は初日から
+     通常通り殺害・行動できる（"1日目は人狼を殺せない"制限は撤廃）。
+     1日目の犠牲者がBot固定になる仕様も撤廃し、通常の投票・襲撃結果に
+     委ねる。
+  5. 進行専任の「ゲームマスター(GM) Bot」を導入する。GM Botは
+     役職を持つ他のプレイヤーボット（人狼Bot・占いBot等）とは完全に
+     別人格・別レイヤーであり、発言や実況は一切行わず、フェーズの
+     時間切れ検知とフェーズ進行（夜→昼→投票→…）の実行のみを担当する。
+     ルーム作成時に自動的にGM Botが1体生成され、部屋が存在する限り
+     常駐する。
+  6. ホストは部屋作成時に「最大人数」「ボットの数」「パスワード
+     （任意）」を設定できる。ボットの強さは固定値を選ばせず、
+     ボット生成時にランダムに決定する。
+  7. ホストは他プレイヤーにホスト権限を譲渡できる（既存機能を維持）。
+  8. パスワード付き部屋を作れるようにする（部屋一覧では鍵アイコンで
+     区別し、参加時にパスワード入力を要求する）。
+  9. 満員時に参加しようとした人は「観戦者」として入室し、ゲームの
+     様子は見えるが発言・行動はできない。次にロビーへ戻った
+     （フェーズが再び lobby になった）タイミングで、観戦者は自動的に
+     プレイヤーへ昇格する。
+  10. 人間プレイヤーが5人以上いる部屋ではボットを自動追加しない。
+     4人以下の場合、合計人数が概ね10人前後（5〜20人の範囲でランダム
+     な目標人数）になるようボットを自動補充する。ホストが明示的に
+     指定したボット数がある場合はそちらを優先する。
+
+■ Supabase テーブル定義（Supabase の SQL Editor で実行しておくこと）
+
+  create table rooms (
+    room_key      text primary key,
+    room_name     text not null,
+    is_official   boolean default false,
+    max_players   int default 10,
+    bot_count     int default -1,      -- -1 = 自動補充
+    password_hash text,                -- nullなら鍵なし
+    phase         text default 'lobby',
+    round         int default 0,
+    state         jsonb default '{}'::jsonb,
+    phase_end_at  timestamptz,
+    created_at    timestamptz default now(),
+    updated_at    timestamptz default now()
+  );
+
+  create table room_players (
+    id          uuid primary key default gen_random_uuid(),
+    room_key    text references rooms(room_key) on delete cascade,
+    client_id   text not null,
+    name        text not null,
+    is_bot      boolean default false,
+    bot_kind    text,                  -- 'gm' | 'role' | null(人間)
+    bot_level   int default 1,
+    is_spectator boolean default false,
+    alive       boolean default true,
+    role        text,
+    seat_order  int,
+    twin_group  text,                  -- 双子/共有者のペアID
+    joined_at   timestamptz default now(),
+    last_seen   timestamptz default now(),
+    unique(room_key, client_id)
+    -- 第6版: 表示名は自動生成のため room_key+name の unique 制約は撤廃
+    -- （既存DBに制約が残っている場合は以下で削除しておくこと）
+    -- alter table room_players drop constraint if exists room_players_room_key_name_key;
+  );
+
+  create table room_messages (
+    id          bigint generated always as identity primary key,
+    room_key    text references rooms(room_key) on delete cascade,
+    channel     text not null,   -- 'lobby'|'alive'|'dead'|'wolves'|'whisper'|'pair'（'dm'は第6版で廃止）
+    from_id     text,
+    from_name   text,
+    to_id       text,
+    reply_to    bigint,
+    mentions    text[],
+    text        text not null,
+    created_at  timestamptz default now()
+  );
+
+  alter table rooms enable row level security;
+  alter table room_players enable row level security;
+  alter table room_messages enable row level security;
+
+  create policy "anon rooms all" on rooms for all using (true) with check (true);
+  create policy "anon players all" on room_players for all using (true) with check (true);
+  create policy "anon messages all" on room_messages for all using (true) with check (true);
+
+  alter publication supabase_realtime add table rooms;
+  alter publication supabase_realtime add table room_players;
+  alter publication supabase_realtime add table room_messages;
+
+  ※ publishable key（匿名キー）から誰でも読み書きできる簡易構成のため、
+    パスワードは平文比較ではなく簡易ハッシュ(SHA-256)をクライアントで
+    計算しroom側に保存・比較する（真に安全な認証ではない点に注意）。
+
+■ GM Bot について
+  ルーム作成時、room_players に is_bot:true, bot_kind:'gm' の行を1件
+  自動追加する。GM Botはチャットへの発言や襲撃・占いなどの行動を
+  一切行わない。フェーズの phase_end_at を過ぎたことを検知した任意の
+  クライアントが「GM Botとして」進行更新（楽観的アドバンス、単一行
+  UPDATEによる直列化）を試みることで、進行そのものをGM Botの人格に
+  紐づけている。これにより人狼Bot等の役職Botの行動ロジックと、
+  進行トリガーのロジックが完全に分離される。
+
+■ 役職ボットの強さ
+  部屋作成時にはボットの強さを選択させず、各役職ボットを生成する際に
+  弱い/普通/強いをランダムに割り当てる。
+
+■ 座席と囁き
+  ゲーム開始時、生存者（人間+役職ボット、GM Botは除く）をシャッフルし
+  seat_order を割り振って円形に配置する。囁きチャンネルは
+  「自分のseat_orderの両隣（前後1人ずつ）」にのみ送信・閲覧できる
+  専用チャンネル('whisper')として扱う。
+
+■ 観戦者と自動昇格
+  満員時に参加しようとした人は is_spectator:true として登録される。
+  観戦者はゲーム画面を閲覧できるが、投票・夜行動・チャット送信は
+  一切できない。フェーズが 'lobby' に戻ったタイミングで、
+  is_spectator な行を is_spectator:false に更新し、通常プレイヤーへ
+  昇格させる（定員に余裕がある範囲で先着順）。
+
+■ 人数とボット自動補充
+  人間プレイヤーが5人以上なら bot_count 自動補充なし。
+  4人以下の場合、目標人数を5〜20の範囲でランダム決定（平均的に10人
+  前後になるよう正規乱数近似で生成）し、不足分をボットで補う。
+  ホストが部屋作成時にボット数を明示指定した場合はそれを優先する。
+
+■ 第5版の追加・変更（役職バランス調整）
+  人狼陣営の中核ロール（人狼／狂人）の総数に上限を設ける。
+  ・人狼（人狼＋大狼の合計）は最大2体まで。
+  ・狂人（狂人＋狂信者の合計）は最大2体まで。
+  大狼・狂信者はそれぞれ人狼・狂人の「上位互換への置き換え」であり、
+  陣営の総人数を追加で増やすものではない。assignRoles()参照。
+
+■ 第6版の追加・変更要件（原文ベース）
+  1. 参加名（表示名）の手入力機能を廃止し、日本人の基本的な名前
+     （「ゆき」等）のプールからランダムに自動生成する方式に変更。
+     数字による重複回避サフィックスは付与しない（重複した場合は
+     そのまま許容する）。ルーム作成・公式部屋参加・既存部屋参加の
+     いずれの導線でも、名前入力画面は「自動生成された名前＋再生成
+     ボタン」のみを表示する。ボットの命名も同じ名前プールを使う。
+     これに伴い room_players.name の unique(room_key, name) 制約は
+     撤廃する（同名の重複を許容するため）。
+  2. 生存者（GM Botを除く）が全員ボットのみになった時点でゲームを
+     即座に終了させる（勝敗ではなく「進行終了」として扱う。
+     winner:'no_humans'）。夜・投票いずれの解決処理の後にも判定する。
+  3. DM（個別チャット）機能を全廃した。room_messages.channel の
+     'dm' は今後使用しない。
+  4. 同じ役職を持つプレイヤー同士（共有者・双子・複数人狼など）は
+     お互いの役職が分かるようにした。加えて、狂信者は人狼（人狼・
+     大狼）の役職を把握できる。knownRoleOf() 参照。参加者一覧では、
+     このように判明している役職を名前の横に表示する。
+  5. 役職Botの発言スケジューリングにあったバグ（フェーズ更新の
+     たびにタイマーが積み上がり、古いタイマー参照が上書きされて
+     正しくクリアされない）を修正。フェーズ＋ラウンドをキーとして
+     1回だけスケジューリングするようにした。
+  6. 役職Botは直近の発言を参照し、(a) 自分への@メンションや名前
+     呼びかけには返信形式で反応し、(b) 「占い」「怪しい」「人狼」
+     「CO」等のキーワードを含む発言には言及して反応するように
+     した。該当がない場合は従来通りランダムな話題を話す。
+  7. 役職の能力を一覧できる「ルールブック」（進行の流れ・勝利条件
+     ・全役職の能力）をモーダルで表示できるようにした。
+  8. 設定・ルールブックなどのモーダルは、背景（モーダル外）を
+     タップ／クリックすると閉じるようにした。
+  9. 霊媒師が実際には結果を確認できていなかったバグ（クリック操作
+     が必要な実装だったため）を修正し、夜フェーズに入ると自動的に
+     前日処刑者の霊媒結果を表示するようにした。
+  10. 役職プール構築時、上限人数を超えて追加した後に配列を切り詰め
+      る処理により、共有者・双子などの「2人1組」役職が片方だけ
+      配られてしまうことがあったバグを修正。人数に収まる場合のみ
+      ペアで追加する。
+
+■ 第7版の追加・変更要件（原文ベース）
+  1. 画面表示を85%ズームにし、全画面に収まりやすくした（html{zoom:.85}）。
+  2. 生存者（GM Bot除く）が全員ボットのみになった場合、フェーズの
+     制限時間を大幅短縮し（夜60→6秒/昼45→10秒/投票20→5秒）、
+     bot行動・発言・投票のタイマーも数百ms〜1秒程度に短縮して
+     超高速で進行するようにした（onlyBotsLeft()参照）。
+  3. 夜フェーズは人狼・占い師・霊媒師・騎士など、行動が必要な役職
+     全員の行動が完了した時点で、制限時間を待たずに即座に終了する
+     処理（maybeAdvanceFromNightActions）を、プレイヤー操作後・
+     bot行動後の両方から確実に呼び出すよう整理した。
+  4. 騎士の護衛があまりに強く決着がつきにくい問題を緩和するため、
+     護衛は30%の確率で「貫通」（失敗）するようにした。
+  5. bot発言の頻度を大幅に引き上げ（level別45〜85%→70〜95%）、
+     直前の疑い発言（「怪しい」「投票」「CO」「人狼」等を含む発言）
+     に同調して同じ相手を疑う「バンドワゴン（魔女狩り心理）」テン
+     プレートを追加した。bot投票でも、既に他者の票が集まっている
+     相手に55%の確率で乗るようにした。
+  6. 人間・botを問わず新規発言に対して、(a) 自分への@メンションや
+     名前呼びかけに返信形式で反応し、(b) 特定キーワードを含む発言
+     に言及して反応するreactToNewMessage()を追加し、bot同士・
+     人間↔bot間のやり取りをより活発にした。
+  7. 参加者一覧に、共有者・双子・複数人狼・狂信者→人狼など、
+     互いに判明している役職をknownRoleOf()で表示するようにした。
+  8. DM機能（'dm'チャンネルおよび関連UI）を完全に削除した
+     （第6版で廃止済みだった残存コードの整理）。
+  9. bot・ホスト判定ロジックの不整合、タイマー多重登録バグなどを
+     修正した。
+
+■ 第8版の追加・変更要件（原文ベース）
+  1. ゲーム画面（screen-game）にも「退出する」導線がなかったため、
+     ロビー画面と同様にゲーム中・結果画面からも leaveRoom() を
+     呼べる退出リンクを追加した。
+  2. 設定モーダルに「管理者パスワード」入力欄を追加した。入力値が
+     "skrisr" と一致した状態で「全部屋をリセット」を押すと、
+     Supabase上の rooms / room_players / room_messages を全件
+     削除し、進行中の全部屋を強制終了・リセットする
+     （adminResetAllRooms() 参照）。誤操作防止のため実行前に
+     確認ダイアログを表示する。
+
+============================================================
+*/
 :root{
   --bg:#0d0f16;
   --bg-panel:#161927;
@@ -299,7 +527,10 @@ select.field{appearance:none;}
       <div class="chat-col">
         <div class="phase-bar">
           <div class="phase-title" id="phaseTitle">夜</div>
-          <div class="timer" id="phaseTimer">--</div>
+          <div style="display:flex;align-items:center;gap:12px">
+            <div class="timer" id="phaseTimer">--</div>
+            <span class="back-link" style="margin-top:0" onclick="leaveRoom()">&larr; 退出する</span>
+          </div>
         </div>
         <div class="action-area" id="actionArea"></div>
         <div class="chat-tabs" id="chatTabs"></div>
@@ -336,6 +567,7 @@ select.field{appearance:none;}
         <div class="result-title" id="resultTitle"></div>
         <div class="muted" id="resultSub"></div>
         <button class="btn primary" style="margin-top:20px" onclick="backToLobbyScreen()">ロビーに戻る</button>
+        <div class="back-link" onclick="leaveRoom()">&larr; 退出する</div>
       </div>
     </div></div>
   </div>
@@ -353,6 +585,10 @@ select.field{appearance:none;}
       <div class="debug-box" id="debugBox"></div>
       <button class="btn small" style="margin-top:8px" onclick="copyDebugLogs()">ログをコピー</button>
     </div>
+    <div class="label" style="margin-top:20px">管理者パスワード</div>
+    <input id="adminPwInput" class="field" type="password" placeholder="パスワードを入力">
+    <button class="btn danger" style="margin-top:10px" onclick="adminResetAllRooms()">全部屋をリセット（強制終了）</button>
+    <div id="adminResetMsg" class="errtext"></div>
     <button class="btn ghost" style="margin-top:18px" onclick="closeSettings()">閉じる</button>
   </div>
 </div>
@@ -544,6 +780,38 @@ function renderDebugPanel(){
 function copyDebugLogs(){
   const text = debugLogs.join('\n');
   if(navigator.clipboard) navigator.clipboard.writeText(text);
+}
+
+/* 第8版: 管理者パスワード "skrisr" が一致した場合のみ、全部屋を強制リセットする */
+const ADMIN_RESET_PASSWORD = 'skrisr';
+async function adminResetAllRooms(){
+  const msgEl = document.getElementById('adminResetMsg');
+  const pw = document.getElementById('adminPwInput').value;
+  msgEl.textContent = '';
+  if(pw !== ADMIN_RESET_PASSWORD){
+    msgEl.textContent = 'パスワードが正しくありません';
+    return;
+  }
+  if(!confirm('本当にすべての部屋をリセット（強制終了）しますか？この操作は取り消せません。')) return;
+  try{
+    await sb.from('room_messages').delete().neq('room_key', '__none__');
+    await sb.from('room_players').delete().neq('room_key', '__none__');
+    await sb.from('rooms').delete().neq('room_key', '__none__');
+    debugLog('ok', '管理者操作: 全部屋をリセットしました');
+    msgEl.style.color = '#8fd39a';
+    msgEl.textContent = '全部屋をリセットしました';
+    document.getElementById('adminPwInput').value = '';
+    leavingIntentionally = true;
+    unsubscribeRealtime();
+    clearInterval(presenceTimer);
+    clearInterval(tickTimer);
+    clearTimeout(botTimer);
+    setTimeout(()=>{ closeSettings(); hardResetToMenu(); }, 1200);
+  }catch(e){
+    debugLog('error','全部屋リセット失敗: ' + e.message);
+    msgEl.style.color = '';
+    msgEl.textContent = 'リセットに失敗しました';
+  }
 }
 
 function openRoleInfo(){
