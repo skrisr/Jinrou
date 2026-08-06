@@ -77,7 +77,7 @@ body{
 .panel{background:var(--bg-panel);border:1px solid var(--line);border-radius:var(--radius);padding:22px;margin-bottom:16px;box-shadow:0 10px 30px rgba(0,0,0,.25);}
 .screen{display:none;}
 .screen.active{display:flex;flex-direction:column;flex:1;min-height:0;}
-#screen-menu.active,#screen-create.active,#screen-roomlist.active,#screen-nameentry.active,#screen-lobby.active,#screen-result.active{display:block;}
+#screen-menu.active,#screen-create.active,#screen-roomlist.active,#screen-nameentry.active,#screen-lobby.active{display:block;}
 
 .btn{
   width:100%;padding:14px 18px;border-radius:10px;border:1px solid var(--line);
@@ -152,7 +152,10 @@ select.field{appearance:none;}
 .msg.self .mfrom{color:var(--seer);}
 .msg .mreply{font-size:11.5px;color:var(--ink-dim);border-left:2px solid var(--line);padding-left:8px;margin-bottom:2px;}
 .msg .mtext .mention{color:var(--seer);font-weight:700;}
+.msg .mtext .mention.self{color:var(--village);}
 .msg.sys{color:var(--village);font-style:normal;}
+.msg.to-me{background:rgba(216,166,87,.14);border-left:3px solid var(--village);padding:6px 8px 6px 10px;border-radius:0 8px 8px 0;margin-left:-2px;}
+.msg.to-me .mfrom{color:var(--village);}
 .reply-bar{display:none;align-items:center;gap:8px;padding:6px 18px;font-size:12px;color:var(--ink-dim);border-top:1px solid var(--line);}
 .reply-bar.show{display:flex;}
 .reply-bar .rb-close{cursor:pointer;color:var(--wolf);font-weight:700;}
@@ -162,12 +165,14 @@ select.field{appearance:none;}
 
 .banner{background:rgba(178,58,72,.14);border:1px solid var(--wolf);color:#ff9aa4;padding:10px 18px;font-size:12.5px;flex:none;}
 .spectator-banner{background:rgba(124,156,196,.14);border:1px solid var(--seer);color:#a9c6e8;padding:10px 18px;font-size:12.5px;flex:none;}
-.result-title{font-family:var(--serif);font-size:30px;font-weight:800;text-align:center;margin:18px 0 6px;}
+.result-box{display:none;padding:16px 18px;border-bottom:1px solid var(--line);flex:none;max-height:50vh;overflow-y:auto;}
+.result-box.show{display:block;}
+.result-title{font-family:var(--serif);font-size:26px;font-weight:800;margin:4px 0 6px;}
 .result-title.wolf-win{color:#ff8f9a;}
 .result-title.village-win{color:#f0c884;}
 .result-title.third-win{color:#e3b6f4;}
-.result-sub-strong{font-weight:700;color:var(--ink);font-size:14px;margin-bottom:10px;}
-.result-stats{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin:14px 0;text-align:left;}
+.result-sub-strong{font-weight:700;color:var(--ink);font-size:13.5px;margin-bottom:10px;}
+.result-stats{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin:12px 0;text-align:left;}
 .result-stats .stat-box{background:var(--bg-panel-2);border:1px solid var(--line);border-radius:10px;padding:10px 12px;}
 .result-stats .stat-box .stat-label{font-size:11px;color:var(--ink-dim);letter-spacing:.05em;}
 .result-stats .stat-box .stat-value{font-size:17px;font-weight:800;font-family:var(--serif);margin-top:2px;}
@@ -237,10 +242,10 @@ select.field{appearance:none;}
     <div class="center-wrap"><div class="center-col">
       <div class="panel">
         <div class="eyebrow">部屋を作成</div>
-        <div class="label">部屋名</div>
+        <div class="label">部屋名（自由に入力できます）</div>
         <div class="row2">
-          <input id="createRoomInput" class="field" maxlength="40" placeholder="自動生成されます" readonly>
-          <button class="btn small" style="margin-top:8px" onclick="regenRoomName()">再生成</button>
+          <input id="createRoomInput" class="field" maxlength="40" placeholder="部屋名を入力">
+          <button class="btn small" style="margin-top:8px" onclick="regenRoomName()">自動生成</button>
         </div>
         <div class="row2">
           <div>
@@ -279,10 +284,10 @@ select.field{appearance:none;}
         <div class="muted" id="nameEntryRoomLabel" style="margin-bottom:6px"></div>
         <div class="label" id="pwLabel" style="display:none">この部屋のパスワード</div>
         <input id="roomPasswordJoinInput" class="field" type="text" maxlength="20" placeholder="パスワード" style="display:none">
-        <div class="label">あなたの参加名（自動生成）</div>
+        <div class="label">あなたの参加名（自由に変更できます）</div>
         <div class="row2">
-          <input id="nameInput" class="field" readonly>
-          <button class="btn small" style="margin-top:8px" onclick="regenParticipantName()">再生成</button>
+          <input id="nameInput" class="field" maxlength="16" placeholder="表示名を入力">
+          <button class="btn small" style="margin-top:8px" onclick="regenParticipantName()">自動生成</button>
         </div>
         <button class="btn primary" style="margin-top:16px" onclick="confirmNameAndJoin()">この名前で入室する</button>
         <div id="nameError" class="errtext"></div>
@@ -322,6 +327,14 @@ select.field{appearance:none;}
             <span class="back-link" style="margin-top:0" onclick="leaveRoom()">&larr; 退出する</span>
           </div>
         </div>
+        <div class="result-box" id="resultBox">
+          <div class="result-title" id="resultTitle"></div>
+          <div class="result-sub-strong" id="resultSubStrong"></div>
+          <div class="result-stats" id="resultStats"></div>
+          <div class="muted" id="resultCountdown"></div>
+          <div class="result-roles" id="resultRoles"></div>
+          <button class="btn primary" style="margin-top:16px" onclick="backToMenuFromResult()">メニューに戻って再度参加する</button>
+        </div>
         <div class="action-area" id="actionArea"></div>
         <div class="chat-tabs" id="chatTabs"></div>
         <div class="chat-body">
@@ -349,20 +362,6 @@ select.field{appearance:none;}
         </div>
       </div>
     </div>
-  </div>
-
-  <div id="screen-result" class="screen">
-    <div class="center-wrap"><div class="center-col">
-      <div class="panel center">
-        <div class="result-title" id="resultTitle"></div>
-        <div class="result-sub-strong" id="resultSubStrong"></div>
-        <div class="result-stats" id="resultStats"></div>
-        <div class="muted" id="resultCountdown"></div>
-        <div class="result-roles" id="resultRoles"></div>
-        <button class="btn primary" style="margin-top:20px" onclick="backToMenuFromResult()">メニューに戻って再度参加する</button>
-        <div class="back-link" onclick="leaveRoom()">&larr; 退出する</div>
-      </div>
-    </div></div>
   </div>
 
 </div>
@@ -434,7 +433,7 @@ const ROLE_INFO = {
   catghost:  { label:'猫又',     team:'village', desc:'処刑されるとランダムで生存者1人を道連れにし、人狼に襲撃されると襲撃してきた人狼を1人道連れにする。' },
   twin:      { label:'双子',     team:'village', desc:'2人1組の役職。片方が死亡すると、もう片方も後を追って死亡する。' },
   werewolf:  { label:'人狼',     team:'wolf', desc:'毎夜、人狼同士で相談し、村人側のプレイヤーを1人襲撃して殺害できる。' },
-  madman:    { label:'狂人',     team:'wolf', desc:'人狼を勝利させるために動く人間。特殊能力はなく、誰が人狼かも知らされていない。' },
+  madman:    { label:'狂人',     team:'wolf', desc:'人狼を勝利させるために動く人間。特殊能力はないが、ゲーム開始時に誰が人狼であるかを知っている。' },
   fanatic:   { label:'狂信者',   team:'wolf', desc:'狂人の上位互換。特殊能力はないが、ゲーム開始時に誰が人狼であるかを最初から知っている。' },
   direwolf:  { label:'大狼',     team:'wolf', desc:'占い師や霊媒師に占われた際、人狼であるにもかかわらず「人間（白）」と判定される人狼。' },
   fox:       { label:'妖狐',     team:'third', desc:'人狼に襲撃されても死なないが、占い師に占われると死亡する。ゲーム終了時に生き残っていれば単独勝利となる。' },
@@ -724,19 +723,26 @@ function regenParticipantName(){
   document.getElementById('nameInput').value = candidate;
 }
 
+function sanitizeRoomKeyPart(raw){
+  return raw.trim().replace(/\s+/g, '_').replace(/[^\p{L}\p{N}_\-]/gu, '');
+}
 async function proceedToName(kind){
   if(kind === 'create'){
-    const key = ROOM_PREFIX + document.getElementById('createRoomInput').value.trim();
+    const rawName = document.getElementById('createRoomInput').value.trim();
     const errEl = document.getElementById('createError');
     errEl.textContent = '';
+    if(!rawName){ errEl.textContent = '部屋名を入力してください'; return; }
+    const keyPart = sanitizeRoomKeyPart(rawName);
+    if(!keyPart){ errEl.textContent = '使用できない部屋名です。別の名前を入力してください'; return; }
+    const key = ROOM_PREFIX + keyPart;
     const maxPlayers = Math.max(5, Math.min(20, parseInt(document.getElementById('maxPlayersInput').value,10) || 10));
     const botRaw = document.getElementById('botCountInput').value;
     const botCount = botRaw === '' ? -1 : Math.max(0, parseInt(botRaw,10) || 0);
     const password = document.getElementById('roomPasswordInput').value.trim();
     const { data, error } = await sb.from('rooms').select('room_key').eq('room_key', key).maybeSingle();
     if(error){ debugLog('error','部屋確認に失敗: '+error.message); }
-    if(data){ errEl.textContent = 'その部屋名は既に使用されています。再生成してください'; return; }
-    joinIntent = { kind:'create', key, name: document.getElementById('createRoomInput').value.trim(), createSettings: { maxPlayers, botCount, password } };
+    if(data){ errEl.textContent = 'その部屋名は既に使用されています。別の名前にしてください'; return; }
+    joinIntent = { kind:'create', key, name: rawName, createSettings: { maxPlayers, botCount, password } };
     document.getElementById('nameEntryRoomLabel').textContent = '「' + joinIntent.name + '」を作成して参加します';
     document.getElementById('pwLabel').style.display = 'none';
     document.getElementById('roomPasswordJoinInput').style.display = 'none';
@@ -978,7 +984,6 @@ function onRoomUpdated(prevPhase){
 function routeToPhaseScreen(){
   if(!room) return;
   if(room.phase === 'lobby'){ showScreen('screen-lobby'); }
-  else if(room.phase === 'ended'){ showScreen('screen-result'); }
   else{ showScreen('screen-game'); }
   renderCurrentScreen();
 }
@@ -1026,7 +1031,7 @@ function renderLobby(){
   players.filter(p=>p.bot_kind!=='gm').forEach(p=>{
     const row = document.createElement('div');
     row.className = 'p-row' + (p.client_id===clientId ? ' me' : '') + (p.is_spectator ? ' spectator' : '');
-    row.innerHTML = '<span class="nm">' + escapeHtml(p.name) + '</span>' + (p.is_bot ? '<span class="tag-bot">Bot</span>' : '') + (p.is_spectator ? '<span class="tag-bot">観戦</span>' : '');
+    row.innerHTML = '<span class="nm">' + escapeHtml(p.name) + (p.client_id===clientId ? '（自分）' : '') + '</span>' + (p.is_bot ? '<span class="tag-bot">Bot</span>' : '') + (p.is_spectator ? '<span class="tag-bot">観戦</span>' : '');
     list.appendChild(row);
   });
   const startBtn = document.getElementById('startBtn');
@@ -1199,7 +1204,7 @@ function knownRoleOf(viewer, target){
   if(viewer.twin_group && viewer.twin_group === target.twin_group) return target.role;
   const wolfRoles = ['werewolf','direwolf'];
   if(wolfRoles.includes(viewer.role) && wolfRoles.includes(target.role)) return target.role;
-  if(viewer.role === 'fanatic' && wolfRoles.includes(target.role)) return target.role;
+  if((viewer.role === 'fanatic' || viewer.role === 'madman') && wolfRoles.includes(target.role)) return target.role;
   return null;
 }
 
@@ -1727,6 +1732,7 @@ function channelIsLocked(){
   if(!room) return false;
   if(amSpectator) return true;
   if(room.phase === 'lobby') return false;
+  if(room.phase === 'ended') return true;
   if(activeChatTab === 'wolves') return room.phase !== 'night';
   if(activeChatTab === 'whisper') return room.phase !== 'day';
   if(activeChatTab === 'pair') return false;
@@ -1736,8 +1742,23 @@ function channelIsLocked(){
 function renderMentionText(text){
   return escapeHtml(text).replace(/@([^\s@]{1,12})/g, (m,name)=>{
     const hit = players.find(p=>p.name===name);
-    return hit ? '<span class="mention">@'+escapeHtml(name)+'</span>' : m;
+    if(!hit) return m;
+    const isSelf = name === myName;
+    return '<span class="mention' + (isSelf ? ' self' : '') + '">@'+escapeHtml(name)+'</span>';
   });
+}
+
+/* 自分宛て（メンション配列に自分が含まれる／本文に@自分の名前がある／自分への返信）かどうかを判定 */
+function isMessageToMe(m){
+  if(!m || !myName) return false;
+  if(m.from_id === clientId) return false;
+  if(Array.isArray(m.mentions) && m.mentions.includes(clientId)) return true;
+  if(m.text && m.text.includes('@'+myName)) return true;
+  if(m.reply_to){
+    const orig = messages.find(x=>x.id===m.reply_to);
+    if(orig && orig.from_id === clientId) return true;
+  }
+  return false;
 }
 
 function visibleMessagesForChannel(chan){
@@ -1765,7 +1786,8 @@ function renderChatArea(){
     list.slice(-150).forEach(m=>{
       const line = document.createElement('div');
       const isSelf = m.from_id === clientId;
-      line.className = 'msg' + (m.from_id===null ? ' sys' : '') + (isSelf ? ' self' : '');
+      const toMe = !isSelf && isMessageToMe(m);
+      line.className = 'msg' + (m.from_id===null ? ' sys' : '') + (isSelf ? ' self' : '') + (toMe ? ' to-me' : '');
       let html = '';
       if(m.reply_to){
         const orig = messages.find(x=>x.id===m.reply_to);
@@ -1856,7 +1878,6 @@ function renderCurrentScreen(){
   if(!active) return;
   if(active.id==='screen-lobby') renderLobby();
   if(active.id==='screen-game') renderGame();
-  if(active.id==='screen-result') renderResult();
 }
 
 function roleTeamClass(role){
@@ -1867,23 +1888,31 @@ function roleTeamClass(role){
 
 function renderGame(){
   if(!room) return;
+  const ended = room.phase === 'ended';
+
   if(amSpectator){
     showBanner('gameBanner', 'あなたは観戦者です。この試合の終了後、次の部屋でプレイヤーへ昇格します。');
+  }else if(ended){
+    clearBanner('gameBanner');
   }else if(onlyBotsLeft()){
     showBanner('gameBanner', '生存者がボットのみになったため、進行を高速化しています。');
   }else{
     clearBanner('gameBanner');
   }
 
-  document.getElementById('phaseTitle').textContent = room.phase==='night'?'夜':room.phase==='day'?'昼・議論':'投票';
+  document.getElementById('phaseTitle').textContent = ended ? '試合終了' : (room.phase==='night'?'夜':room.phase==='day'?'昼・議論':'投票');
   clearInterval(tickTimer);
   const tickEl = document.getElementById('phaseTimer');
-  tickTimer = setInterval(()=>{
-    if(!room || !room.phase_end_at){ tickEl.textContent='--'; return; }
-    const remain = Math.max(0, Math.ceil((new Date(room.phase_end_at).getTime() - Date.now())/1000));
-    tickEl.textContent = remain + '秒';
-    if(remain<=0) checkPhaseTimeout();
-  }, 250);
+  if(ended){
+    tickEl.textContent = '--';
+  }else{
+    tickTimer = setInterval(()=>{
+      if(!room || !room.phase_end_at){ tickEl.textContent='--'; return; }
+      const remain = Math.max(0, Math.ceil((new Date(room.phase_end_at).getTime() - Date.now())/1000));
+      tickEl.textContent = remain + '秒';
+      if(remain<=0) checkPhaseTimeout();
+    }, 250);
+  }
 
   const badgeWrap = document.getElementById('roleBadgeWrap');
   if(myRole && !amSpectator){
@@ -1896,85 +1925,110 @@ function renderGame(){
   const me = players.find(p=>p.client_id===clientId);
   const amAlive = me ? me.alive : false;
   const actionArea = document.getElementById('actionArea');
-  actionArea.innerHTML = '';
+  const resultBox = document.getElementById('resultBox');
 
-  if(amSpectator){
-    actionArea.innerHTML = '<div class="muted">観戦中です。行動や投票はできません。</div>';
-  }else if(!amAlive){
-    actionArea.innerHTML = '<div class="muted">あなたは脱落しました。死亡者チャットで見守りましょう。全員の正体が確認できます。</div>';
-  }else if(room.phase==='night' && ['werewolf','direwolf','seer','medium','knight'].includes(myRole)){
-    const labelMap = {
-      werewolf:'襲撃する相手を選んでください', direwolf:'襲撃する相手を選んでください',
-      seer:'占う相手を選んでください', medium:'（霊媒結果は昼に処刑者があれば自動表示されます）',
-      knight:'守る相手を選んでください'
-    };
-    const wrap = document.createElement('div');
-    wrap.innerHTML = '<div class="label" style="margin-top:0">' + labelMap[myRole] + '</div>';
-    if(myRole!=='medium'){
+  if(ended){
+    resultBox.classList.add('show');
+    actionArea.style.display = 'none';
+    actionArea.innerHTML = '';
+    renderResultIntoGame();
+  }else{
+    resultBox.classList.remove('show');
+    actionArea.style.display = '';
+    actionArea.innerHTML = '';
+
+    if(amSpectator){
+      actionArea.innerHTML = '<div class="muted">観戦中です。行動や投票はできません。</div>';
+    }else if(!amAlive){
+      actionArea.innerHTML = '<div class="muted">あなたは脱落しました。死亡者チャットで見守りましょう。全員の正体が確認できます。</div>';
+    }else if(room.phase==='night' && ['werewolf','direwolf','seer','medium','knight'].includes(myRole)){
+      const labelMap = {
+        werewolf:'襲撃する相手を選んでください', direwolf:'襲撃する相手を選んでください',
+        seer:'占う相手を選んでください', medium:'（霊媒結果は昼に処刑者があれば自動表示されます）',
+        knight:'守る相手を選んでください'
+      };
+      const wrap = document.createElement('div');
+      wrap.innerHTML = '<div class="label" style="margin-top:0">' + labelMap[myRole] + '</div>';
+      if(myRole!=='medium'){
+        const list = document.createElement('div');
+        list.className = 'target-list';
+        const state = room.state || {};
+        const already = (state.nightActions||{})[clientId];
+        players.filter(p=>p.alive && p.client_id!==clientId && p.bot_kind!=='gm').forEach(p=>{
+          if((myRole==='werewolf'||myRole==='direwolf') && (p.role==='werewolf'||p.role==='direwolf')) return;
+          const row = document.createElement('div');
+          row.className = 'target' + (selectedTarget===p.client_id||(already&&already.target===p.client_id)?' selected':'');
+          row.textContent = p.name;
+          row.onclick = async ()=>{
+            selectedTarget = p.client_id;
+            await handleNightAction(p.client_id);
+            renderGame();
+          };
+          list.appendChild(row);
+        });
+        wrap.appendChild(list);
+      }
+      actionArea.appendChild(wrap);
+      if(myRole==='seer' && seerResult){
+        const r = document.createElement('div');
+        r.className = 'muted'; r.style.marginTop = '10px';
+        r.textContent = '占い結果：' + seerResult.target + ' は ' + (seerResult.isFox ? '妖狐（死亡しました）' : (seerResult.isWerewolf?'人狼':'人狼ではない'));
+        actionArea.appendChild(r);
+      }
+      if(myRole==='medium' && mediumResult){
+        const r = document.createElement('div');
+        r.className = 'muted'; r.style.marginTop = '10px';
+        r.textContent = '霊媒結果：' + mediumResult.target + ' は ' + (mediumResult.isWerewolf?'人狼だった':'人狼ではなかった');
+        actionArea.appendChild(r);
+      }
+      if((myRole==='madman' || myRole==='fanatic') ){
+        // handled below in wolf-knowledge box
+      }
+    }else if(room.phase==='night'){
+      actionArea.innerHTML = '<div class="muted">役職を持つ人が行動中です。夜が明けるのを待っています…（全員の行動が終わり次第、自動で進行します）</div>';
+    }else if(room.phase==='day'){
+      actionArea.innerHTML = '<div class="muted">生存者で議論しましょう。まもなく投票が始まります。</div>';
+    }else if(room.phase==='vote'){
+      const wrap = document.createElement('div');
+      wrap.innerHTML = '<div class="label" style="margin-top:0">処刑する相手に投票してください</div>';
       const list = document.createElement('div');
       list.className = 'target-list';
       const state = room.state || {};
-      const already = (state.nightActions||{})[clientId];
-      players.filter(p=>p.alive && p.client_id!==clientId && p.bot_kind!=='gm').forEach(p=>{
-        if((myRole==='werewolf'||myRole==='direwolf') && (p.role==='werewolf'||p.role==='direwolf')) return;
+      const already = (state.votes||{})[clientId];
+      players.filter(p=>p.alive && p.bot_kind!=='gm').forEach(p=>{
         const row = document.createElement('div');
-        row.className = 'target' + (selectedTarget===p.client_id||(already&&already.target===p.client_id)?' selected':'');
-        row.textContent = p.name;
+        row.className = 'target' + (selectedVote===p.client_id||already===p.client_id?' selected':'');
+        row.textContent = p.name + (p.client_id===clientId?'（自分）':'');
         row.onclick = async ()=>{
-          selectedTarget = p.client_id;
-          await handleNightAction(p.client_id);
+          selectedVote = p.client_id;
+          await handleVote(p.client_id);
           renderGame();
         };
         list.appendChild(row);
       });
       wrap.appendChild(list);
+      actionArea.appendChild(wrap);
     }
-    actionArea.appendChild(wrap);
-    if(myRole==='seer' && seerResult){
-      const r = document.createElement('div');
-      r.className = 'muted'; r.style.marginTop = '10px';
-      r.textContent = '占い結果：' + seerResult.target + ' は ' + (seerResult.isFox ? '妖狐（死亡しました）' : (seerResult.isWerewolf?'人狼':'人狼ではない'));
-      actionArea.appendChild(r);
+
+    if(amAlive && !amSpectator && (myRole==='madman' || myRole==='fanatic')){
+      const wolfNames = players.filter(p=>p.role==='werewolf'||p.role==='direwolf').map(p=>p.name);
+      if(wolfNames.length){
+        const box = document.createElement('div');
+        box.className = 'muted';
+        box.style.marginTop = '10px';
+        box.textContent = '人狼の正体：' + wolfNames.join('、');
+        actionArea.appendChild(box);
+      }
     }
-    if(myRole==='medium' && mediumResult){
-      const r = document.createElement('div');
-      r.className = 'muted'; r.style.marginTop = '10px';
-      r.textContent = '霊媒結果：' + mediumResult.target + ' は ' + (mediumResult.isWerewolf?'人狼だった':'人狼ではなかった');
-      actionArea.appendChild(r);
-    }
-  }else if(room.phase==='night'){
-    actionArea.innerHTML = '<div class="muted">役職を持つ人が行動中です。夜が明けるのを待っています…（全員の行動が終わり次第、自動で進行します）</div>';
-  }else if(room.phase==='day'){
-    actionArea.innerHTML = '<div class="muted">生存者で議論しましょう。まもなく投票が始まります。</div>';
-  }else if(room.phase==='vote'){
-    const wrap = document.createElement('div');
-    wrap.innerHTML = '<div class="label" style="margin-top:0">処刑する相手に投票してください</div>';
-    const list = document.createElement('div');
-    list.className = 'target-list';
-    const state = room.state || {};
-    const already = (state.votes||{})[clientId];
-    players.filter(p=>p.alive && p.bot_kind!=='gm').forEach(p=>{
-      const row = document.createElement('div');
-      row.className = 'target' + (selectedVote===p.client_id||already===p.client_id?' selected':'');
-      row.textContent = p.name + (p.client_id===clientId?'（自分）':'');
-      row.onclick = async ()=>{
-        selectedVote = p.client_id;
-        await handleVote(p.client_id);
-        renderGame();
-      };
-      list.appendChild(row);
-    });
-    wrap.appendChild(list);
-    actionArea.appendChild(wrap);
   }
 
   const list = document.getElementById('gamePlayers');
   list.innerHTML = '';
-  const showAllRoles = !amAlive || amSpectator;
+  const showAllRoles = !amAlive || amSpectator || ended;
   players.filter(p=>p.bot_kind!=='gm').forEach(p=>{
     const row = document.createElement('div');
     row.className = 'p-row' + (p.client_id===clientId?' me':'') + (!p.alive?' dead':'');
-    row.innerHTML = '<span class="nm">' + escapeHtml(p.name) + '</span>' + (p.is_bot?'<span class="tag-bot">Bot</span>':'');
+    row.innerHTML = '<span class="nm">' + escapeHtml(p.name) + (p.client_id===clientId ? '（自分）' : '') + '</span>' + (p.is_bot?'<span class="tag-bot">Bot</span>':'');
     if(showAllRoles && p.role){
       const rv = document.createElement('span');
       const team = ROLE_INFO[p.role] ? ROLE_INFO[p.role].team : 'village';
@@ -1990,7 +2044,7 @@ function renderGame(){
         row.appendChild(kv);
       }
     }
-    if(p.client_id!==clientId && p.alive && room.phase!=='night' && !amSpectator){
+    if(p.client_id!==clientId && p.alive && room.phase!=='night' && !amSpectator && !ended){
       const mtn = document.createElement('button');
       mtn.className = 'mtn-btn';
       mtn.textContent = '@';
@@ -2011,7 +2065,7 @@ function renderGame(){
   if(room.phase!=='vote'){ selectedVote=null; }
 }
 
-function renderResult(){
+function renderResultIntoGame(){
   if(!room) return;
   const win = room.state && room.state.winner;
   let title = '村人陣営の勝利';
