@@ -8,149 +8,6 @@
 <link href="https://fonts.googleapis.com/css2?family=Shippori+Mincho:wght@500;700;800&family=Zen+Kaku+Gothic+New:wght@400;500;700&display=swap" rel="stylesheet">
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <style>
-/*
-============================================================
- 仕様書 / カスタム指示（第4版：13役職・GM Bot・観戦・パスワード対応）
-============================================================
-
-■ 第4版の追加・変更要件（原文ベース）
-  1. 役職を13種に拡張する。
-     村人陣営: 村人／占い師／霊媒師／騎士（狩人）／共有者(2人1組)／
-               猫又／双子(2人1組)
-     人狼陣営: 人狼／狂人／狂信者(人狼を最初から知る狂人上位互換)／
-               大狼(占い・霊媒で人間判定される人狼)
-     第三陣営: 妖狐(人狼襲撃無効・占いで死亡・生存で単独勝利)／
-               てるてる坊主(処刑されると単独勝利。死者は全員の正体が
-               見える)
-  2. 囁き（ささやき）機能：ゲーム開始時に生存者をランダムに円形に
-     着席させ、隣（両隣）の人にだけ囁ける専用チャンネルを持つ。
-  3. チャットは「相手（チャンネル）をスライドタブで横に切り替え」、
-     「発言はテキスト自由入力」の両対応にする。
-  4. 人狼・狂人（および狂信者・大狼など人狼陣営の一部）は初日から
-     通常通り殺害・行動できる（"1日目は人狼を殺せない"制限は撤廃）。
-     1日目の犠牲者がBot固定になる仕様も撤廃し、通常の投票・襲撃結果に
-     委ねる。
-  5. 進行専任の「ゲームマスター(GM) Bot」を導入する。GM Botは
-     役職を持つ他のプレイヤーボット（人狼Bot・占いBot等）とは完全に
-     別人格・別レイヤーであり、発言や実況は一切行わず、フェーズの
-     時間切れ検知とフェーズ進行（夜→昼→投票→…）の実行のみを担当する。
-     ルーム作成時に自動的にGM Botが1体生成され、部屋が存在する限り
-     常駐する。
-  6. ホストは部屋作成時に「最大人数」「ボットの数」「パスワード
-     （任意）」を設定できる。ボットの強さは固定値を選ばせず、
-     ボット生成時にランダムに決定する。
-  7. ホストは他プレイヤーにホスト権限を譲渡できる（既存機能を維持）。
-  8. パスワード付き部屋を作れるようにする（部屋一覧では鍵アイコンで
-     区別し、参加時にパスワード入力を要求する）。
-  9. 満員時に参加しようとした人は「観戦者」として入室し、ゲームの
-     様子は見えるが発言・行動はできない。次にロビーへ戻った
-     （フェーズが再び lobby になった）タイミングで、観戦者は自動的に
-     プレイヤーへ昇格する。
-  10. 人間プレイヤーが5人以上いる部屋ではボットを自動追加しない。
-     4人以下の場合、合計人数が概ね10人前後（5〜20人の範囲でランダム
-     な目標人数）になるようボットを自動補充する。ホストが明示的に
-     指定したボット数がある場合はそちらを優先する。
-
-■ Supabase テーブル定義（Supabase の SQL Editor で実行しておくこと）
-
-  create table rooms (
-    room_key      text primary key,
-    room_name     text not null,
-    is_official   boolean default false,
-    max_players   int default 10,
-    bot_count     int default -1,      -- -1 = 自動補充
-    password_hash text,                -- nullなら鍵なし
-    phase         text default 'lobby',
-    round         int default 0,
-    state         jsonb default '{}'::jsonb,
-    phase_end_at  timestamptz,
-    created_at    timestamptz default now(),
-    updated_at    timestamptz default now()
-  );
-
-  create table room_players (
-    id          uuid primary key default gen_random_uuid(),
-    room_key    text references rooms(room_key) on delete cascade,
-    client_id   text not null,
-    name        text not null,
-    is_bot      boolean default false,
-    bot_kind    text,                  -- 'gm' | 'role' | null(人間)
-    bot_level   int default 1,
-    is_spectator boolean default false,
-    alive       boolean default true,
-    role        text,
-    seat_order  int,
-    twin_group  text,                  -- 双子/共有者のペアID
-    joined_at   timestamptz default now(),
-    last_seen   timestamptz default now(),
-    unique(room_key, name),
-    unique(room_key, client_id)
-  );
-
-  create table room_messages (
-    id          bigint generated always as identity primary key,
-    room_key    text references rooms(room_key) on delete cascade,
-    channel     text not null,   -- 'lobby'|'alive'|'dead'|'wolves'|'whisper'|'dm'|'pair'
-    from_id     text,
-    from_name   text,
-    to_id       text,
-    reply_to    bigint,
-    mentions    text[],
-    text        text not null,
-    created_at  timestamptz default now()
-  );
-
-  alter table rooms enable row level security;
-  alter table room_players enable row level security;
-  alter table room_messages enable row level security;
-
-  create policy "anon rooms all" on rooms for all using (true) with check (true);
-  create policy "anon players all" on room_players for all using (true) with check (true);
-  create policy "anon messages all" on room_messages for all using (true) with check (true);
-
-  alter publication supabase_realtime add table rooms;
-  alter publication supabase_realtime add table room_players;
-  alter publication supabase_realtime add table room_messages;
-
-  ※ publishable key（匿名キー）から誰でも読み書きできる簡易構成のため、
-    パスワードは平文比較ではなく簡易ハッシュ(SHA-256)をクライアントで
-    計算しroom側に保存・比較する（真に安全な認証ではない点に注意）。
-
-■ GM Bot について
-  ルーム作成時、room_players に is_bot:true, bot_kind:'gm' の行を1件
-  自動追加する。GM Botはチャットへの発言や襲撃・占いなどの行動を
-  一切行わない。フェーズの phase_end_at を過ぎたことを検知した任意の
-  クライアントが「GM Botとして」進行更新（楽観的アドバンス、単一行
-  UPDATEによる直列化）を試みることで、進行そのものをGM Botの人格に
-  紐づけている。これにより人狼Bot等の役職Botの行動ロジックと、
-  進行トリガーのロジックが完全に分離される。
-
-■ 役職ボットの強さ
-  部屋作成時にはボットの強さを選択させず、各役職ボットを生成する際に
-  弱い/普通/強いをランダムに割り当てる。
-
-■ 座席と囁き
-  ゲーム開始時、生存者（人間+役職ボット、GM Botは除く）をシャッフルし
-  seat_order を割り振って円形に配置する。囁きチャンネルは
-  「自分のseat_orderの両隣（前後1人ずつ）」にのみ送信・閲覧できる
-  専用チャンネル('whisper')として扱う。
-
-■ 観戦者と自動昇格
-  満員時に参加しようとした人は is_spectator:true として登録される。
-  観戦者はゲーム画面を閲覧できるが、投票・夜行動・チャット送信は
-  一切できない。フェーズが 'lobby' に戻ったタイミングで、
-  is_spectator な行を is_spectator:false に更新し、通常プレイヤーへ
-  昇格させる（定員に余裕がある範囲で先着順）。
-
-■ 人数とボット自動補充
-  人間プレイヤーが5人以上なら bot_count 自動補充なし。
-  4人以下の場合、目標人数を5〜20の範囲でランダム決定（平均的に10人
-  前後になるよう正規乱数近似で生成）し、不足分をボットで補う。
-  ホストが部屋作成時にボット数を明示指定した場合はそれを優先する。
-
-============================================================
-*/
-
 :root{
   --bg:#0d0f16;
   --bg-panel:#161927;
@@ -565,8 +422,6 @@ const ROLE_INFO = {
   teruteru:  { label:'てるてる坊主', team:'third', desc:'昼の投票で自分が処刑されることを目指す。処刑された瞬間に単独勝利となる。' }
 };
 const TEAM_LABEL = { village:'村人陣営', wolf:'人狼陣営', third:'第三陣営' };
-function isWolfSideJudgedAsWolf(role){ return role==='werewolf' || role==='madman' && false || role==='fanatic' && false; }
-function isSeenAsWerewolf(role){ return role==='werewolf'; } // direwolf, fox等は白判定/対象外は個別処理
 
 const BOT_NAMES = ['クロ','ミライ','ソラ','つむぎ','はやぶさ','かなで','しずく','ゆき','あかね','りん','ノア','ヒカリ','レン','ミサキ','トウカ'];
 
@@ -998,14 +853,23 @@ async function checkPhaseTimeout(){
   await gmTryAdvancePhase();
 }
 
+/*
+ 修正点: 従来はphaseだけを条件にした楽観ロックだったため、
+ 複数クライアントがほぼ同時に「成功」を判定できてしまう隙があった。
+ phase_end_at も一致条件に加え、それをnullに書き換えることで
+ 実際にDB上でロックを奪えたクライアントだけが後続処理を行うようにする。
+*/
 async function gmTryAdvancePhase(){
   if(advanceLock) return;
   advanceLock = true;
   try{
     const expectedPhase = room.phase;
+    const expectedEndAt = room.phase_end_at;
     const { data, error } = await sb.from('rooms')
-      .update({ state: room.state, updated_at: new Date().toISOString() })
-      .eq('room_key', roomKey).eq('phase', expectedPhase)
+      .update({ phase_end_at: null, updated_at: new Date().toISOString() })
+      .eq('room_key', roomKey)
+      .eq('phase', expectedPhase)
+      .eq('phase_end_at', expectedEndAt)
       .select().maybeSingle();
     if(error || !data){ advanceLock = false; return; }
     if(expectedPhase === 'night') await resolveNight();
@@ -1035,7 +899,6 @@ function renderLobby(){
   const waitNote = document.getElementById('lobbyWaitNote');
   const humanPlayers = players.filter(p=>!p.is_bot && !p.is_spectator);
   const amFirst = humanPlayers.length > 0 && humanPlayers[0].client_id === clientId;
-  const total = humanPlayers.length + Math.max(0, (room.bot_count!==undefined && room.bot_count>=0) ? room.bot_count : (humanPlayers.length<5 ? 4 : 0));
   if(amFirst){
     startBtn.style.display = 'block';
     startBtn.disabled = false;
@@ -1059,19 +922,19 @@ function renderLobbyLog(){
   el.scrollTop = el.scrollHeight;
 }
 
+/*
+ 修正点: 従来は判定ロジックがhostStartGame()内のamFirst判定と食い違っていたため
+ （humanPlayersに観戦者を含めるかどうかがブレていた）、意図した人が実行できない、
+ または誰も実行しないケースがあった。判定を「非観戦の人間プレイヤーの先頭」で統一する。
+*/
 async function promoteSpectatorsIfHost(){
-  const humanPlayers = players.filter(p=>!p.is_bot);
-  const amFirst = humanPlayers.length>0 && humanPlayers.filter(p=>!p.is_spectator)[0] && humanPlayers.filter(p=>!p.is_spectator)[0].client_id===clientId;
-  if(!amFirst && !(humanPlayers.length>0 && humanPlayers[0].client_id===clientId)) return;
+  const nonSpectatorHumans = players.filter(p=>!p.is_bot && !p.is_spectator);
+  const amFirst = nonSpectatorHumans.length>0 && nonSpectatorHumans[0].client_id===clientId;
+  if(!amFirst) return;
   const { data: cur } = await sb.from('room_players').select('*').eq('room_key', roomKey).eq('is_spectator', true).eq('is_bot', false);
   if(!cur || cur.length===0) return;
   await sb.from('room_players').update({ is_spectator:false }).eq('room_key', roomKey).eq('is_spectator', true).eq('is_bot', false);
   debugLog('ok', '観戦者をプレイヤーへ昇格しました');
-}
-
-function pickBotRoleCount(n){
-  const wolfCount = Math.max(1, Math.floor(n/4) + (n>=8?1:0));
-  return wolfCount;
 }
 
 async function hostStartGame(){
@@ -1096,7 +959,6 @@ async function hostStartGame(){
     await sb.from('room_players').insert(bots.map(b=>({ room_key: roomKey, client_id: b.client_id, name: b.name, is_bot: true, bot_kind:'role', bot_level: b.bot_level, alive: true, is_spectator:false })));
   }
 
-  const { data: allPlayers } = await sb.from('room_players').select('*').eq('room_key', roomKey).eq('is_bot', false).or('is_bot.eq.true,is_bot.eq.false');
   const { data: rosterAll } = await sb.from('room_players').select('*').eq('room_key', roomKey);
   const roster = (rosterAll||[]).filter(p=>p.bot_kind !== 'gm' && !p.is_spectator);
 
@@ -1131,15 +993,31 @@ async function hostStartGame(){
   await postMessage('alive', null, null, null, null, null, '1日目の夜になりました');
 }
 
+/*
+ 修正点: 人狼陣営の中核である「人狼」と「狂人」を、それぞれ最大2体までに固定した。
+ direwolf(大狼)は人狼の1体を置き換えるもの、fanatic(狂信者)は狂人の1体を置き換えるものとし、
+ 陣営全体の人数はこれまで通り増やさない。
+ これにより、大人数の部屋でも人狼側が過剰に多くなってバランスが崩れることを防ぐ。
+*/
 function assignRoles(ids, n){
   const roleMap = {};
   let pool = [];
-  const wolfCount = Math.max(1, Math.floor(n/4) + (n>=8?1:0));
-  const thirdEnabled = n >= 6;
+
+  const wolfCount   = n >= 8 ? 2 : 1;                 // 5〜7人:1体, 8人以上:2体（最大2）
+  const madmanCount = n >= 9 ? 2 : (n >= 6 ? 1 : 0);  // 6〜8人:1体, 9人以上:2体（最大2）
+
   for(let i=0;i<wolfCount;i++) pool.push('werewolf');
-  if(n>=6) pool.push('madman');
-  if(n>=9) pool.push('fanatic');
-  if(n>=12 && wolfCount>=2){ pool.pop(); pool.push('direwolf'); }
+  for(let i=0;i<madmanCount;i++) pool.push('madman');
+
+  if(n>=9 && pool.indexOf('madman')!==-1){
+    pool[pool.indexOf('madman')] = 'fanatic';
+  }
+  if(n>=12 && pool.indexOf('werewolf')!==-1){
+    pool[pool.indexOf('werewolf')] = 'direwolf';
+  }
+
+  const thirdEnabled = n >= 6;
+
   pool.push('seer');
   if(n>=7) pool.push('medium');
   if(n>=6) pool.push('knight');
@@ -1148,8 +1026,10 @@ function assignRoles(ids, n){
   if(thirdEnabled) pool.push('fox');
   if(n>=9) pool.push('teruteru');
   if(n>=12 && pool.filter(r=>r!=='villager').length < n){ pool.push('twin'); pool.push('twin'); }
+
   while(pool.length < n) pool.push('villager');
   pool = pool.slice(0, n);
+
   for(let i=pool.length-1;i>0;i--){ const j=Math.floor(Math.random()*(i+1)); [pool[i],pool[j]]=[pool[j],pool[i]]; }
   ids.forEach((id,i)=>{ roleMap[id] = pool[i]; });
   return roleMap;
@@ -1752,10 +1632,15 @@ function flipRoleCard(){
   document.getElementById('cardHint').style.display = 'none';
   document.getElementById('cardStartBtn').style.display = 'block';
 }
+/*
+ 修正点: 従来はrenderGame()を直接呼んでいたため、タイマーやムーンアイコンなど
+ renderCurrentScreen()側で行っている更新が反映されないことがあった。
+ renderCurrentScreen()に統一する。
+*/
 function dismissRoleCard(){
   revealPending = false;
   document.getElementById('cardOverlay').classList.add('hidden');
-  renderGame();
+  renderCurrentScreen();
 }
 function renderRoleCardOverlay(){
   document.getElementById('cardOverlay').classList.remove('hidden');
