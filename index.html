@@ -302,8 +302,8 @@ body{
 .center-col{width:100%;max-width:560px;}
 
 .game-layout{flex:1;min-height:0;display:flex;gap:0;}
-.chat-col{flex:1 1 60%;min-width:0;display:flex;flex-direction:column;border-right:1px solid var(--line);}
-.side-col{flex:0 0 320px;max-width:38%;display:flex;flex-direction:column;overflow-y:auto;padding:16px;gap:14px;}
+.chat-col{flex:1 1 60%;min-width:0;min-height:0;display:flex;flex-direction:column;border-right:1px solid var(--line);overflow:hidden;}
+.side-col{flex:0 0 320px;max-width:38%;min-height:0;display:flex;flex-direction:column;overflow-y:auto;padding:16px;gap:14px;}
 
 .panel{background:var(--bg-panel);border:1px solid var(--line);border-radius:var(--radius);padding:22px;margin-bottom:16px;}
 .screen{display:none;}
@@ -360,7 +360,7 @@ select.field{appearance:none;}
 .role-badge.third-team{background:rgba(192,122,216,.18);color:#e3b6f4;border:1px solid var(--fox);}
 .role-desc-box{margin-top:8px;font-size:12.5px;color:var(--ink-dim);}
 
-.action-area{padding:14px 18px;border-bottom:1px solid var(--line);flex:none;}
+.action-area{padding:14px 18px;border-bottom:1px solid var(--line);flex:none;max-height:36vh;overflow-y:auto;}
 .target-list{display:flex;flex-direction:column;gap:8px;margin-top:10px;}
 .target{display:flex;justify-content:space-between;align-items:center;padding:10px 14px;border-radius:10px;border:1px solid var(--line);background:var(--bg);cursor:pointer;}
 .target.selected{border-color:var(--village);background:var(--bg-panel-2);}
@@ -658,25 +658,63 @@ function pickUnusedName(usedNames){
   return source[Math.floor(Math.random()*source.length)];
 }
 
-/* 第7版: bot発言テンプレートを大幅拡充し、人間らしい迷い・同調・反論を表現 */
+/* 第9版: bot発言テンプレートをさらに大幅拡充し、会話が自然に続くようにした */
 const BOT_TEMPLATES = {
-  1: ['なんとなく{target}が怪しい気がする…', 'わからないよ〜', '多数決で決めよう', '{target}、ちょっと静かすぎない?', '正直まだ誰が誰だか分からない', 'みんなの意見に従うよ'],
-  2: ['{target}の発言、なんか辻褄が合ってない気がする', '自分は村人です、信じてください', '占い師さん、そろそろ結果を教えてほしい', '{target}を疑ってる人多くない?', 'さっきの{target}の発言、ちょっと引っかかる', '流れ的に{target}が怪しいかな'],
-  3: ['占い師CO。{target}は白でした', '{target}の初日の動きが不自然だった。今日はそこに投票しよう', '冷静に考えて、{target}が一番怪しいと思う', '自分は占い師です。信じてもらえると助かります', '論理的に見て、{target}が一番矛盾してる', '票を集中させるなら{target}だと思う']
+  1: [
+    'なんとなく{target}が怪しい気がする…', 'わからないよ〜', '多数決で決めよう', '{target}、ちょっと静かすぎない?',
+    '正直まだ誰が誰だか分からない', 'みんなの意見に従うよ', 'うーん、まだ判断つかないな', '{target}の顔が気になる、なんとなく',
+    'とりあえず様子見しようかな', '{target}ってどう思う?意見聞きたい', '今日は静かだね、みんなもっと話そうよ',
+    '自分は特に疑ってる人いないかな', '{target}、なんか反応薄くない?', 'こういう時こそ冷静にいきたいね'
+  ],
+  2: [
+    '{target}の発言、なんか辻褄が合ってない気がする', '自分は村人です、信じてください', '占い師さん、そろそろ結果を教えてほしい',
+    '{target}を疑ってる人多くない?', 'さっきの{target}の発言、ちょっと引っかかる', '流れ的に{target}が怪しいかな',
+    '{target}の反応、ちょっと不自然じゃない?', '正直まだ決めきれないけど、{target}は気になってる',
+    'みんなはどう見てる?自分は{target}が気になる', '{target}、さっきから発言が少ないの気になるな',
+    '一晩考えたけど{target}が引っかかる', 'そろそろ誰かCOしてくれないかな', '{target}の初日の動き、覚えてる人いる?'
+  ],
+  3: [
+    '占い師CO。{target}は白でした', '{target}の初日の動きが不自然だった。今日はそこに投票しよう',
+    '冷静に考えて、{target}が一番怪しいと思う', '自分は占い師です。信じてもらえると助かります',
+    '論理的に見て、{target}が一番矛盾してる', '票を集中させるなら{target}だと思う',
+    '状況を整理すると、{target}の発言に矛盾がある', '生存者の発言を振り返ると、{target}が浮いてる',
+    'ここで{target}を疑わないと後で後悔すると思う', '占い結果と照らし合わせても{target}は怪しい',
+    '感覚だけじゃなく根拠を持って{target}を疑ってる'
+  ]
 };
-const BOT_WOLF_TALK = ['{target}を今夜襲おう', '占い師っぽいのは{target}かも', '慎重にいこう', '賛成、そこでいいと思う', 'それでいこう、{target}にする', '騎士に守られてそうだから別の人にしない?'];
+/* 誰かを名指ししない、雑談・場をつなぐための発言（会話の間を埋める） */
+const BOT_FILLER_TEMPLATES = [
+  'そろそろ時間もないし、まとめていこう', 'みんな、意見が出そろってきた気がする', '今日は決めきれるといいね',
+  'ちょっと考えがまとまらないから、しばらく聞いてる', 'このまま議論続けよう', '難しい局面だね、正直',
+  '一旦落ち着いて考えよう', 'そういう見方もあるのか、なるほど', 'うんうん、それは一理あるね'
+];
+const BOT_WOLF_TALK = [
+  '{target}を今夜襲おう', '占い師っぽいのは{target}かも', '慎重にいこう', '賛成、そこでいいと思う',
+  'それでいこう、{target}にする', '騎士に守られてそうだから別の人にしない?', '{target}は発言力あるし早めに消したい',
+  '正直誰でもいいけど{target}が一番怖いかな', 'このままだと追い詰められるから{target}にしよう',
+  '占い師を潰したいから{target}にしない?', '{target}、村人側で信頼されてそうだから狙おう'
+];
 /* 同調（バンドワゴン／魔女狩り心理）: 他人の疑い発言に便乗するテンプレート */
-const BOT_BANDWAGON_TEMPLATES = ['たしかに{target}は自分も怪しいと思ってた', '{from}さんに同意、{target}に投票しよう', 'それ自分も感じてた、{target}怪しいよね', '{from}さんの意見に乗るよ、{target}で決まりだと思う', '多数がそう言うなら{target}なんだろうな', '{target}への疑いが増えてきたし、自分もそれで行く'];
+const BOT_BANDWAGON_TEMPLATES = [
+  'たしかに{target}は自分も怪しいと思ってた', '{from}さんに同意、{target}に投票しよう', 'それ自分も感じてた、{target}怪しいよね',
+  '{from}さんの意見に乗るよ、{target}で決まりだと思う', '多数がそう言うなら{target}なんだろうな', '{target}への疑いが増えてきたし、自分もそれで行く',
+  '{from}さんがそう言うなら信じるよ、{target}に一票', '流れ的に{target}が濃厚だよね、自分もそう思う',
+  '{from}さんの言う通り{target}は怪しいと思う', 'みんなが{target}を疑ってるなら自分もそっちに乗る'
+];
 
 /* 第6版: 他プレイヤーの発言（メンション・キーワード）に反応するためのテンプレート */
-const MENTION_REPLY_TEMPLATES = ['{from}さん、呼びました?', 'はい、{from}さん、なんでしょう', '{from}さんに聞かれると緊張するね…', 'それは違うと思うよ、{from}さん', '{from}さん、なんで自分のこと聞くの?', '{from}さん、自分は違うと思うけどな'];
+const MENTION_REPLY_TEMPLATES = [
+  '{from}さん、呼びました?', 'はい、{from}さん、なんでしょう', '{from}さんに聞かれると緊張するね…', 'それは違うと思うよ、{from}さん',
+  '{from}さん、なんで自分のこと聞くの?', '{from}さん、自分は違うと思うけどな', '{from}さん、ちゃんと説明するね',
+  '{from}さんにそう言われると困るな…', '{from}さん、根拠を聞かせてほしいな', '{from}さん、自分は村人だよ、信じて'
+];
 const KEYWORD_REACT_TEMPLATES = {
-  '占い': ['占い師の結果、そろそろ気になるね', '占いCOはまだ出てないの?', '占い師さん、頼りにしてます'],
-  'CO': ['そのCO、本当に信じていいのかな', 'COありがとう、参考にするね', 'COが重なってるのが気になる'],
-  '人狼': ['人狼だとしたら誰だろう…', '人狼っぽい動きしてる人いる?', 'まだ人狼の確信は持てないな'],
-  '怪しい': ['たしかに怪しいかも', 'いや、まだ判断できないと思う', 'その根拠をもう少し聞きたい'],
-  '白': ['白判定なら信じていいのかな', 'それだけで安心はできないけどね'],
-  '黒': ['黒判定は重要な情報だね', '本当に黒なのか、詳しく聞きたい']
+  '占い': ['占い師の結果、そろそろ気になるね', '占いCOはまだ出てないの?', '占い師さん、頼りにしてます', '占い結果次第で票が変わりそう'],
+  'CO': ['そのCO、本当に信じていいのかな', 'COありがとう、参考にするね', 'COが重なってるのが気になる', 'COのタイミングも重要だと思う'],
+  '人狼': ['人狼だとしたら誰だろう…', '人狼っぽい動きしてる人いる?', 'まだ人狼の確信は持てないな', '人狼はきっと嘘をついてるはず'],
+  '怪しい': ['たしかに怪しいかも', 'いや、まだ判断できないと思う', 'その根拠をもう少し聞きたい', '怪しいと思う理由、詳しく聞きたいな'],
+  '白': ['白判定なら信じていいのかな', 'それだけで安心はできないけどね', '白でも油断はできないと思う'],
+  '黒': ['黒判定は重要な情報だね', '本当に黒なのか、詳しく聞きたい', '黒が出たなら投票先はそこで決まりかな']
 };
 
 /* ---------- ランダム部屋名 ---------- */
@@ -1422,13 +1460,18 @@ async function resolveNight(){
 
   const tally = {};
   Object.values(actions).forEach(a=>{ if(a.role==='werewolf'||a.role==='direwolf') tally[a.target] = (tally[a.target]||0)+1; });
-  let killTarget = null, max = 0;
-  Object.entries(tally).forEach(([id,c])=>{ if(c>max){ max=c; killTarget=id; } });
+  /* 襲撃先が割れた場合はタイの中からランダムに選ぶ（毎回固定の相手にならないようにする） */
+  let killTarget = null, max = 0, killTied = [];
+  Object.entries(tally).forEach(([id,c])=>{
+    if(c>max){ max=c; killTied=[id]; }
+    else if(c===max && max>0){ killTied.push(id); }
+  });
+  if(killTied.length) killTarget = killTied[Math.floor(Math.random()*killTied.length)];
 
   let guardedId = null;
   Object.values(actions).forEach(a=>{ if(a.role==='knight') guardedId = a.target; });
   /* 騎士が強すぎて決着がつかない問題への対処: 護衛は一定確率で失敗する（貫通）ようにする */
-  const guardPenetrates = Math.random() < 0.3;
+  const guardPenetrates = Math.random() < 0.4;
   if(guardPenetrates) guardedId = null;
 
   const deaths = [];
@@ -1527,17 +1570,25 @@ async function resolveVote(){
   const votes = state.votes || {};
   const tally = {};
   Object.values(votes).forEach(t=>{ tally[t]=(tally[t]||0)+1; });
-  let top=null,max=0,tie=false;
+  let max=0, tiedIds=[];
   Object.entries(tally).forEach(([id,c])=>{
-    if(c>max){ max=c; top=id; tie=false; } else if(c===max){ tie=true; }
+    if(c>max){ max=c; tiedIds=[id]; }
+    else if(c===max && max>0){ tiedIds.push(id); }
   });
+  /* 票が割れて決着がつかない問題への対処: 完全同数でも一定確率でランダムに決選投票的に1人処刑する */
+  let top = null;
+  if(tiedIds.length===1){
+    top = tiedIds[0];
+  }else if(tiedIds.length>1 && Math.random()<0.6){
+    top = tiedIds[Math.floor(Math.random()*tiedIds.length)];
+  }
   const { data: currentPlayers } = await sb.from('room_players').select('*').eq('room_key', roomKey);
   let updatedPlayers = currentPlayers;
   let executedId = null;
   let teruteruWin = false;
   let cascadeDeaths = [];
 
-  if(top && !tie){
+  if(top){
     const executed = currentPlayers.find(p=>p.client_id===top);
     if(executed){
       await sb.from('room_players').update({ alive:false }).eq('room_key', roomKey).eq('client_id', top);
@@ -1704,6 +1755,9 @@ function scheduleBotChat(){
           const target = mentionedName || pool[Math.floor(Math.random()*pool.length)];
           line = BOT_BANDWAGON_TEMPLATES[Math.floor(Math.random()*BOT_BANDWAGON_TEMPLATES.length)]
             .replace('{from}', suspicionMsg.from_name||'誰か').replace('{target}', target.name);
+        }else if(Math.random()<0.2){
+          /* 会話の間を埋める雑談・つなぎの発言（自然な流れを演出） */
+          line = BOT_FILLER_TEMPLATES[Math.floor(Math.random()*BOT_FILLER_TEMPLATES.length)];
         }else{
           const target = pool[Math.floor(Math.random()*pool.length)];
           const templates = BOT_TEMPLATES[level] || BOT_TEMPLATES[1];
