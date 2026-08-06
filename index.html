@@ -83,14 +83,16 @@
     twin_group  text,                  -- 双子/共有者のペアID
     joined_at   timestamptz default now(),
     last_seen   timestamptz default now(),
-    unique(room_key, name),
     unique(room_key, client_id)
+    -- 第6版: 表示名は自動生成のため room_key+name の unique 制約は撤廃
+    -- （既存DBに制約が残っている場合は以下で削除しておくこと）
+    -- alter table room_players drop constraint if exists room_players_room_key_name_key;
   );
 
   create table room_messages (
     id          bigint generated always as identity primary key,
     room_key    text references rooms(room_key) on delete cascade,
-    channel     text not null,   -- 'lobby'|'alive'|'dead'|'wolves'|'whisper'|'dm'|'pair'
+    channel     text not null,   -- 'lobby'|'alive'|'dead'|'wolves'|'whisper'|'pair'（'dm'は第6版で廃止）
     from_id     text,
     from_name   text,
     to_id       text,
@@ -154,6 +156,44 @@
   ・狂人（狂人＋狂信者の合計）は最大2体まで。
   大狼・狂信者はそれぞれ人狼・狂人の「上位互換への置き換え」であり、
   陣営の総人数を追加で増やすものではない。assignRoles()参照。
+
+■ 第6版の追加・変更要件（原文ベース）
+  1. 参加名（表示名）の手入力機能を廃止し、日本人の基本的な名前
+     （「ゆき」等）のプールからランダムに自動生成する方式に変更。
+     数字による重複回避サフィックスは付与しない（重複した場合は
+     そのまま許容する）。ルーム作成・公式部屋参加・既存部屋参加の
+     いずれの導線でも、名前入力画面は「自動生成された名前＋再生成
+     ボタン」のみを表示する。ボットの命名も同じ名前プールを使う。
+     これに伴い room_players.name の unique(room_key, name) 制約は
+     撤廃する（同名の重複を許容するため）。
+  2. 生存者（GM Botを除く）が全員ボットのみになった時点でゲームを
+     即座に終了させる（勝敗ではなく「進行終了」として扱う。
+     winner:'no_humans'）。夜・投票いずれの解決処理の後にも判定する。
+  3. DM（個別チャット）機能を全廃した。room_messages.channel の
+     'dm' は今後使用しない。
+  4. 同じ役職を持つプレイヤー同士（共有者・双子・複数人狼など）は
+     お互いの役職が分かるようにした。加えて、狂信者は人狼（人狼・
+     大狼）の役職を把握できる。knownRoleOf() 参照。参加者一覧では、
+     このように判明している役職を名前の横に表示する。
+  5. 役職Botの発言スケジューリングにあったバグ（フェーズ更新の
+     たびにタイマーが積み上がり、古いタイマー参照が上書きされて
+     正しくクリアされない）を修正。フェーズ＋ラウンドをキーとして
+     1回だけスケジューリングするようにした。
+  6. 役職Botは直近の発言を参照し、(a) 自分への@メンションや名前
+     呼びかけには返信形式で反応し、(b) 「占い」「怪しい」「人狼」
+     「CO」等のキーワードを含む発言には言及して反応するように
+     した。該当がない場合は従来通りランダムな話題を話す。
+  7. 役職の能力を一覧できる「ルールブック」（進行の流れ・勝利条件
+     ・全役職の能力）をモーダルで表示できるようにした。
+  8. 設定・ルールブックなどのモーダルは、背景（モーダル外）を
+     タップ／クリックすると閉じるようにした。
+  9. 霊媒師が実際には結果を確認できていなかったバグ（クリック操作
+     が必要な実装だったため）を修正し、夜フェーズに入ると自動的に
+     前日処刑者の霊媒結果を表示するようにした。
+  10. 役職プール構築時、上限人数を超えて追加した後に配列を切り詰め
+      る処理により、共有者・双子などの「2人1組」役職が片方だけ
+      配られてしまうことがあったバグを修正。人数に収まる場合のみ
+      ペアで追加する。
 
 ============================================================
 */
@@ -305,12 +345,6 @@ select.field{appearance:none;}
 .chat-row .field{margin-top:0;}
 .chat-locked-note{padding:12px 18px;color:var(--ink-dim);font-size:12.5px;border-top:1px solid var(--line);}
 
-.dm-panel{background:var(--bg-panel-2);border:1px solid var(--line);border-radius:10px;padding:12px;}
-.dm-title{font-size:12px;color:var(--ink-dim);letter-spacing:.08em;margin-bottom:8px;display:flex;justify-content:space-between;align-items:center;}
-.dm-thread-list{display:flex;flex-direction:column;gap:4px;max-height:140px;overflow-y:auto;}
-.dm-thread{padding:6px 8px;border-radius:6px;cursor:pointer;font-size:12.5px;color:var(--ink-dim);}
-.dm-thread.active{background:var(--bg);color:var(--ink);}
-
 .banner{background:rgba(178,58,72,.14);border:1px solid var(--wolf);color:#ff9aa4;padding:10px 18px;font-size:12.5px;flex:none;}
 .spectator-banner{background:rgba(124,156,196,.14);border:1px solid var(--seer);color:#a9c6e8;padding:10px 18px;font-size:12.5px;flex:none;}
 .result-title{font-family:var(--serif);font-size:30px;font-weight:800;text-align:center;margin:18px 0 6px;}
@@ -337,7 +371,6 @@ select.field{appearance:none;}
   .game-layout{flex-direction:column;}
   .chat-col{border-right:none;border-bottom:1px solid var(--line);flex:1 1 55%;}
   .side-col{flex:1 1 45%;max-width:none;flex-direction:row;flex-wrap:wrap;}
-  .side-col .dm-panel{flex:1 1 100%;}
 }
 </style>
 </head>
@@ -363,7 +396,7 @@ select.field{appearance:none;}
         <button class="btn" onclick="startJoinFlow('official')">公式部屋に参加する</button>
         <button class="btn" onclick="startJoinFlow('create')">部屋を作成する</button>
         <button class="btn" onclick="startJoinFlow('list')">既存の部屋に参加する</button>
-        <div class="link" style="margin-top:14px;display:inline-block" onclick="openRoleInfo()">役職について見る（全13種）</div>
+        <div class="link" style="margin-top:14px;display:inline-block" onclick="openRoleInfo()">ルールブックを見る（進行ルール・全13役職）</div>
       </div>
     </div></div>
   </div>
@@ -410,12 +443,15 @@ select.field{appearance:none;}
   <div id="screen-nameentry" class="screen">
     <div class="center-wrap"><div class="center-col">
       <div class="panel">
-        <div class="eyebrow">表示名を決める</div>
+        <div class="eyebrow">参加名を確認</div>
         <div class="muted" id="nameEntryRoomLabel" style="margin-bottom:6px"></div>
         <div class="label" id="pwLabel" style="display:none">この部屋のパスワード</div>
         <input id="roomPasswordJoinInput" class="field" type="text" maxlength="20" placeholder="パスワード" style="display:none">
-        <div class="label">表示名（この部屋の中で重複できません）</div>
-        <input id="nameInput" class="field" maxlength="12" placeholder="村人A" onkeydown="if(event.key==='Enter')confirmNameAndJoin()">
+        <div class="label">あなたの参加名（自動生成）</div>
+        <div class="row2">
+          <input id="nameInput" class="field" readonly>
+          <button class="btn small" style="margin-top:8px" onclick="regenParticipantName()">再生成</button>
+        </div>
         <button class="btn primary" style="margin-top:16px" onclick="confirmNameAndJoin()">この名前で入室する</button>
         <div id="nameError" class="errtext"></div>
       </div>
@@ -476,10 +512,6 @@ select.field{appearance:none;}
           <div class="label" style="margin-top:0">参加者</div>
           <div class="player-list" id="gamePlayers" style="margin-top:8px"></div>
         </div>
-        <div class="dm-panel">
-          <div class="dm-title"><span>DM</span></div>
-          <div class="dm-thread-list" id="dmThreadList"></div>
-        </div>
       </div>
     </div>
   </div>
@@ -496,7 +528,7 @@ select.field{appearance:none;}
 
 </div>
 
-<div class="modal-overlay hidden" id="settingsModal">
+<div class="modal-overlay hidden" id="settingsModal" onclick="if(event.target===this) closeSettings()">
   <div class="modal-box">
     <div class="eyebrow">設定</div>
     <div class="checkline">
@@ -511,9 +543,9 @@ select.field{appearance:none;}
   </div>
 </div>
 
-<div class="modal-overlay hidden" id="roleInfoModal">
+<div class="modal-overlay hidden" id="roleInfoModal" onclick="if(event.target===this) closeRoleInfo()">
   <div class="modal-box">
-    <div class="eyebrow">役職について（全13種）</div>
+    <div class="eyebrow">ルールブック</div>
     <div id="roleInfoList"></div>
     <button class="btn ghost" style="margin-top:8px" onclick="closeRoleInfo()">閉じる</button>
   </div>
@@ -550,7 +582,15 @@ const ROLE_INFO = {
 };
 const TEAM_LABEL = { village:'村人陣営', wolf:'人狼陣営', third:'第三陣営' };
 
-const BOT_NAMES = ['クロ','ミライ','ソラ','つむぎ','はやぶさ','かなで','しずく','ゆき','あかね','りん','ノア','ヒカリ','レン','ミサキ','トウカ'];
+/* 第6版: 表示名の手入力を廃止し、参加者・ボット共通の日本人名プールから自動生成する（数字サフィックスなし） */
+const NAME_POOL = ['ゆき','ソラ','ミライ','つむぎ','はやぶさ','かなで','しずく','あかね','りん','ノア','ヒカリ','レン','ミサキ','トウカ','ハル','アオイ','ユウ','サクラ','カエデ','コトネ','ハルト','ミナト','ユイ','アオバ','イブキ','ヒナタ','マナ','リク','ソウ','ツバサ','アヤネ','コハル','ハヤト','ミオ','アスカ','カイ','ユズキ','ナギ','スズ','レイ'];
+
+function pickUnusedName(usedNames){
+  const usedSet = new Set(usedNames||[]);
+  const pool = NAME_POOL.filter(n=>!usedSet.has(n));
+  const source = pool.length ? pool : NAME_POOL;
+  return source[Math.floor(Math.random()*source.length)];
+}
 
 const BOT_TEMPLATES = {
   1: ['なんとなく{target}が怪しい気がする…', 'わからないよ〜', '多数決で決めよう', '{target}、ちょっと静かすぎない?'],
@@ -558,6 +598,17 @@ const BOT_TEMPLATES = {
   3: ['占い師CO。{target}は白でした', '{target}の初日の動きが不自然だった。今日はそこに投票しよう', '冷静に考えて、{target}が一番怪しいと思う', '自分は占い師です。信じてもらえると助かります']
 };
 const BOT_WOLF_TALK = ['{target}を今夜襲おう', '占い師っぽいのは{target}かも', '慎重にいこう', '賛成、そこでいいと思う'];
+
+/* 第6版: 他プレイヤーの発言（メンション・キーワード）に反応するためのテンプレート */
+const MENTION_REPLY_TEMPLATES = ['{from}さん、呼びました?', 'はい、{from}さん、なんでしょう', '{from}さんに聞かれると緊張するね…', 'それは違うと思うよ、{from}さん', '{from}さん、なんで自分のこと聞くの?'];
+const KEYWORD_REACT_TEMPLATES = {
+  '占い': ['占い師の結果、そろそろ気になるね', '占いCOはまだ出てないの?', '占い師さん、頼りにしてます'],
+  'CO': ['そのCO、本当に信じていいのかな', 'COありがとう、参考にするね', 'COが重なってるのが気になる'],
+  '人狼': ['人狼だとしたら誰だろう…', '人狼っぽい動きしてる人いる?', 'まだ人狼の確信は持てないな'],
+  '怪しい': ['たしかに怪しいかも', 'いや、まだ判断できないと思う', 'その根拠をもう少し聞きたい'],
+  '白': ['白判定なら信じていいのかな', 'それだけで安心はできないけどね'],
+  '黒': ['黒判定は重要な情報だね', '本当に黒なのか、詳しく聞きたい']
+};
 
 /* ---------- ランダム部屋名 ---------- */
 const words1 = ["Alpha","Shadow","Ghost","Cyber","Dark","Neon","Lunar","Solar","Hyper","Sonic","Mystic","Phantom","Cosmic","Quantum","Omega","Delta","Vector","Apex","Matrix","Vortex","Blaze","Frost","Iron","Steel","Chaos","Astra","Pixel","Crypto","Retro","Binary","Aero","Nitro","Prism","Savage","Giga","Mega","Micro","Titan","Rogue","Fallen"];
@@ -596,14 +647,14 @@ let messagesChannel = null;
 let presenceTimer = null;
 let tickTimer = null;
 let advanceLock = false;
-let botTimer = null;
+let botTimers = [];
+let botScheduleKey = null;
 let gmTimer = null;
 
 let selectedTarget = null;
 let selectedVote = null;
 let activeChatTab = 'lobby';
 let replyTarget = null;
-let dmSelectedId = null;
 let leavingIntentionally = false;
 
 let settings = { debugMode: false };
@@ -664,6 +715,14 @@ function copyDebugLogs(){
 function openRoleInfo(){
   const wrap = document.getElementById('roleInfoList');
   wrap.innerHTML = '';
+  const flow = document.createElement('div');
+  flow.className = 'role-info-item';
+  flow.innerHTML = '<b>ゲームの流れ</b><div class="muted">「夜」に人狼が襲撃し、占い師・霊媒師・騎士がそれぞれの能力を使います。続く「昼」に生存者で自由に議論し、「投票」で処刑者を1人決めます。これを繰り返します。</div>';
+  wrap.appendChild(flow);
+  const win = document.createElement('div');
+  win.className = 'role-info-item';
+  win.innerHTML = '<b>勝利条件</b><div class="muted">村人陣営: 生存する人狼（大狼含む）が0人になった時点で勝利。<br>人狼陣営: 生存する人狼の数が人狼以外の生存者数以上になった時点で勝利。<br>妖狐: 人狼の襲撃では死なないが占われると死亡。ゲーム終了時点で生存していれば単独勝利。<br>てるてる坊主: 昼の投票で処刑された瞬間に単独勝利。<br>その他: 生存者がボットのみになった場合、ゲームはそこで終了します。</div>';
+  wrap.appendChild(win);
   ['village','wolf','third'].forEach(team=>{
     const header = document.createElement('div');
     header.className = 'label';
@@ -694,12 +753,7 @@ function escapeHtml(s){
 function startJoinFlow(kind){
   if(kind === 'official'){
     joinIntent = { kind:'official', key: OFFICIAL_KEY, name: '公式部屋', createSettings: null };
-    document.getElementById('nameEntryRoomLabel').textContent = '公式部屋 に参加します';
-    document.getElementById('pwLabel').style.display = 'none';
-    document.getElementById('roomPasswordJoinInput').style.display = 'none';
-    document.getElementById('nameInput').value = loadLocal('jinro_name','');
-    document.getElementById('nameError').textContent = '';
-    showScreen('screen-nameentry');
+    goToNameEntry('公式部屋 に参加します', false);
   }else if(kind === 'create'){
     regenRoomName();
     document.getElementById('roomPasswordInput').value = '';
@@ -712,6 +766,31 @@ function startJoinFlow(kind){
 
 function regenRoomName(){
   document.getElementById('createRoomInput').value = generateGameTag();
+}
+
+/* 第6版: 参加名は自動生成のみ。既存メンバーの名前を軽く避けつつランダムに割り当てる */
+async function goToNameEntry(labelText, needsPassword){
+  document.getElementById('nameEntryRoomLabel').textContent = labelText;
+  document.getElementById('pwLabel').style.display = needsPassword ? 'block' : 'none';
+  document.getElementById('roomPasswordJoinInput').style.display = needsPassword ? 'block' : 'none';
+  document.getElementById('roomPasswordJoinInput').value = '';
+  document.getElementById('nameError').textContent = '';
+  let used = [];
+  if(joinIntent && joinIntent.kind !== 'create'){
+    const { data } = await sb.from('room_players').select('name').eq('room_key', joinIntent.key);
+    used = (data||[]).map(p=>p.name);
+  }
+  document.getElementById('nameInput').value = pickUnusedName(used);
+  showScreen('screen-nameentry');
+}
+function regenParticipantName(){
+  const cur = document.getElementById('nameInput').value;
+  let candidate = cur, tries = 0;
+  while(candidate === cur && tries < 10){
+    candidate = NAME_POOL[Math.floor(Math.random()*NAME_POOL.length)];
+    tries++;
+  }
+  document.getElementById('nameInput').value = candidate;
 }
 
 async function proceedToName(kind){
