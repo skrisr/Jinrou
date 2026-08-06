@@ -167,6 +167,13 @@ select.field{appearance:none;}
 .result-title.village-win{color:#f0c884;}
 .result-title.third-win{color:#e3b6f4;}
 .result-sub-strong{font-weight:700;color:var(--ink);font-size:14px;margin-bottom:10px;}
+.result-stats{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin:14px 0;text-align:left;}
+.result-stats .stat-box{background:var(--bg-panel-2);border:1px solid var(--line);border-radius:10px;padding:10px 12px;}
+.result-stats .stat-box .stat-label{font-size:11px;color:var(--ink-dim);letter-spacing:.05em;}
+.result-stats .stat-box .stat-value{font-size:17px;font-weight:800;font-family:var(--serif);margin-top:2px;}
+.result-stats .stat-box.wolf .stat-value{color:#ff8f9a;}
+.result-stats .stat-box.village .stat-value{color:#f0c884;}
+.result-stats .stat-box.third .stat-value{color:#e3b6f4;}
 .result-roles{margin-top:14px;text-align:left;display:flex;flex-direction:column;gap:6px;}
 .result-role-row{display:flex;justify-content:space-between;align-items:center;padding:8px 12px;border-radius:8px;background:var(--bg-panel-2);border:1px solid var(--line);font-size:13px;}
 .result-role-row .rr-team{font-size:11px;padding:2px 8px;border-radius:10px;}
@@ -349,6 +356,7 @@ select.field{appearance:none;}
       <div class="panel center">
         <div class="result-title" id="resultTitle"></div>
         <div class="result-sub-strong" id="resultSubStrong"></div>
+        <div class="result-stats" id="resultStats"></div>
         <div class="muted" id="resultCountdown"></div>
         <div class="result-roles" id="resultRoles"></div>
         <button class="btn primary" style="margin-top:20px" onclick="backToMenuFromResult()">メニューに戻って再度参加する</button>
@@ -398,9 +406,9 @@ const NIGHT_MS = 60000;
 const DAY_MS = 45000;
 const VOTE_MS = 20000;
 /* ボットは常に一瞬で判断する。全員ボットの場合はさらに極端に短縮する */
-const NIGHT_MS_FAST = 6000;
-const DAY_MS_FAST = 10000;
-const VOTE_MS_FAST = 5000;
+const NIGHT_MS_FAST = 1500;
+const DAY_MS_FAST = 2000;
+const VOTE_MS_FAST = 1200;
 const PRESENCE_STALE_MS = 20000;
 const RESULT_CLEANUP_MS = 9000;
 
@@ -1112,6 +1120,8 @@ async function hostStartGame(){
     updated_at: new Date().toISOString()
   }).eq('room_key', roomKey);
   await postMessage('alive', null, null, null, null, null, '1日目の夜になりました');
+  const startPlayers = ids.map(id=>({ client_id:id, alive:true, bot_kind:'role', role: roleMap[id] }));
+  await maybeInstantResolveEmptyNight(startPlayers);
 }
 
 /*
@@ -1306,13 +1316,9 @@ async function resolveNight(){
   const winner = computeWinner(finalPlayers);
   if(winner){ await endGame(winner); return; }
 
-  if(computeOnlyBots(finalPlayers)){
-    await postMessage('alive', null, null, null, null, null, '生存者が全員ボットになったため、進行を終了します');
-    await sb.from('rooms').update({ phase:'ended', state: Object.assign({}, state, { deaths, winner:'no_humans' }) }).eq('room_key', roomKey);
-    return;
-  }
-
-  const dur = computeOnlyBots(finalPlayers) ? NIGHT_MS_FAST : dayDurationMs();
+  /* 生存者が全員ボットになっても試合を打ち切らず、ダイジェスト的に爆速で進行させ、
+     必ず勝敗が決するまでプレイし続ける（フェーズ時間はonlyBotsLeft()により自動短縮される） */
+  const dur = dayDurationMs();
   await sb.from('rooms').update({
     phase: 'day',
     phase_end_at: new Date(Date.now() + dur).toISOString(),
@@ -1417,18 +1423,27 @@ async function resolveVote(){
   const winner = computeWinner(updatedPlayers);
   if(winner){ await endGame(winner); return; }
 
-  if(computeOnlyBots(updatedPlayers)){
-    await postMessage('alive', null, null, null, null, null, '生存者が全員ボットになったため、進行を終了します');
-    await sb.from('rooms').update({ phase:'ended', state: Object.assign({}, state, { winner:'no_humans' }) }).eq('room_key', roomKey);
-    return;
-  }
-
+  /* 生存者が全員ボットになっても打ち切らず、爆速のダイジェスト進行で勝敗が決するまで続ける */
   await sb.from('rooms').update({
     phase: 'night', round: (cur.round||1) + 1,
     phase_end_at: new Date(Date.now() + nightDurationMs()).toISOString(),
     state: Object.assign({}, state, { nightActions:{}, votes:{}, deaths: [], medium_last_executed: executedId })
   }).eq('room_key', roomKey).eq('phase','vote');
   await postMessage('alive', null, null, null, null, null, ((cur.round||1)+1) + '日目の夜になりました');
+  await maybeInstantResolveEmptyNight(updatedPlayers);
+}
+
+/* 夜に行動する必要のある役職（人狼・大狼・占い師・騎士）が誰も生存していない場合、
+   誰も行動できないため制限時間を待たずに即座に夜を終了させる */
+async function maybeInstantResolveEmptyNight(playerList){
+  const actingRoles = ['werewolf','direwolf','seer','knight'];
+  const actors = playerList.filter(p=>p.alive && p.bot_kind!=='gm' && actingRoles.includes(p.role));
+  if(actors.length>0) return;
+  const { data: freshRoom } = await sb.from('rooms').select('*').eq('room_key', roomKey).maybeSingle();
+  if(freshRoom && freshRoom.phase==='night'){
+    room = freshRoom;
+    await gmTryAdvancePhase();
+  }
 }
 
 function computeWinner(playerList){
@@ -2012,15 +2027,37 @@ function renderResult(){
     cls = 'third-win';
     sub = 'てるてる坊主が処刑され、単独で勝利しました';
   }
-  if(win==='no_humans'){
-    title = '進行終了';
-    cls = '';
-    sub = '生存者が全員ボットになったため、この試合は終了しました';
-  }
   const titleEl = document.getElementById('resultTitle');
   titleEl.textContent = title;
   titleEl.className = 'result-title' + (cls ? ' ' + cls : '');
   document.getElementById('resultSubStrong').textContent = sub;
+
+  const real = players.filter(p=>p.bot_kind!=='gm');
+  const aliveByTeam = { village:0, wolf:0, third:0 };
+  real.forEach(p=>{
+    if(!p.alive) return;
+    const team = ROLE_INFO[p.role] ? ROLE_INFO[p.role].team : 'village';
+    aliveByTeam[team] = (aliveByTeam[team]||0) + 1;
+  });
+  const deadCount = real.filter(p=>!p.alive).length;
+  const botCount = real.filter(p=>p.is_bot).length;
+  const humanCount = real.length - botCount;
+  const statsEl = document.getElementById('resultStats');
+  statsEl.innerHTML = '';
+  const stats = [
+    { label:'経過ラウンド数', value: (room.round||1) + '日目', cls:'' },
+    { label:'最終生存者', value: (real.length - deadCount) + ' / ' + real.length + '人', cls:'' },
+    { label:'村人陣営 生存', value: aliveByTeam.village + '人', cls:'village' },
+    { label:'人狼陣営 生存', value: aliveByTeam.wolf + '人', cls:'wolf' },
+    { label:'第三陣営 生存', value: aliveByTeam.third + '人', cls:'third' },
+    { label:'人間 / ボット', value: humanCount + '人 / ' + botCount + '人', cls:'' }
+  ];
+  stats.forEach(s=>{
+    const box = document.createElement('div');
+    box.className = 'stat-box' + (s.cls ? ' ' + s.cls : '');
+    box.innerHTML = '<div class="stat-label">' + escapeHtml(s.label) + '</div><div class="stat-value">' + escapeHtml(s.value) + '</div>';
+    statsEl.appendChild(box);
+  });
 
   const rolesEl = document.getElementById('resultRoles');
   rolesEl.innerHTML = '';
