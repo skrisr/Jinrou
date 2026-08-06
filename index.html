@@ -327,15 +327,6 @@ select.field{appearance:none;}
 .role-info-item b{font-family:var(--serif);}
 .role-info-item .fac{font-size:11px;color:var(--ink-dim);letter-spacing:.08em;}
 .debug-box{margin-top:12px;background:var(--bg);border:1px solid var(--line);border-radius:10px;padding:10px;max-height:220px;overflow-y:auto;font-size:11px;color:var(--ink-dim);font-family:monospace;white-space:pre-wrap;word-break:break-all;}
-.card-overlay{position:fixed;inset:0;background:rgba(6,7,12,.94);display:flex;flex-direction:column;align-items:center;justify-content:center;z-index:950;padding:20px;text-align:center;}
-.role-card{width:220px;height:310px;perspective:1200px;cursor:pointer;}
-.role-card-inner{position:relative;width:100%;height:100%;transition:transform .9s cubic-bezier(.4,.1,.2,1);transform-style:preserve-3d;}
-.role-card.flipped .role-card-inner{transform:rotateY(180deg);}
-.role-card-face{position:absolute;inset:0;backface-visibility:hidden;border-radius:16px;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:20px;}
-.role-card-front{background:linear-gradient(135deg,#1d2133,#0d0f16);border:1px solid var(--line);font-family:var(--serif);font-size:40px;color:var(--ink-dim);}
-.role-card-back{background:linear-gradient(135deg,var(--bg-panel-2),var(--bg));border:2px solid var(--village);transform:rotateY(180deg);}
-.role-card-back .rn{font-family:var(--serif);font-size:24px;font-weight:800;margin-bottom:10px;}
-.card-hint{color:var(--ink-dim);font-size:13px;margin-top:18px;}
 
 .mention-pop{position:absolute;bottom:52px;left:18px;background:var(--bg-panel-2);border:1px solid var(--line);border-radius:8px;overflow:hidden;z-index:50;min-width:160px;box-shadow:0 8px 24px rgba(0,0,0,.4);}
 .mention-pop.hidden{display:none;}
@@ -528,20 +519,6 @@ select.field{appearance:none;}
   </div>
 </div>
 
-<div class="card-overlay hidden" id="cardOverlay">
-  <div class="role-card" id="roleCard" onclick="flipRoleCard()">
-    <div class="role-card-inner">
-      <div class="role-card-face role-card-front">?</div>
-      <div class="role-card-face role-card-back">
-        <div class="rn" id="cardRoleName"></div>
-        <div class="muted" id="cardRoleDesc" style="font-size:13px"></div>
-      </div>
-    </div>
-  </div>
-  <div class="card-hint" id="cardHint">カードをタップして役職を確認</div>
-  <button class="btn primary" id="cardStartBtn" style="display:none;max-width:220px;margin-top:16px" onclick="dismissRoleCard()">はじめる</button>
-</div>
-
 <script>
 const SUPABASE_URL = "https://gzszxogwrxqmlksqfjma.supabase.co";
 const SUPABASE_KEY = "sb_publishable_iP2uXd88GR_osFMyYDykTA_O8tyodQZ";
@@ -628,8 +605,6 @@ let activeChatTab = 'lobby';
 let replyTarget = null;
 let dmSelectedId = null;
 let leavingIntentionally = false;
-let revealPending = false;
-let revealFlipped = false;
 
 let settings = { debugMode: false };
 let debugLogs = [];
@@ -1437,7 +1412,7 @@ async function backToLobbyScreen(){
     await sb.from('rooms').update({ phase:'lobby', round:0, phase_end_at:null, state:{} }).eq('room_key', roomKey);
     await postMessage('lobby', null, null, null, null, null, 'ロビーに戻りました');
   }
-  myRole = null; seerResult = null; mediumResult = null; revealPending = false;
+  myRole = null; seerResult = null; mediumResult = null;
   showScreen('screen-lobby');
 }
 
@@ -1766,42 +1741,9 @@ function openDMFor(p){
 /* ---------- 役職カード ---------- */
 
 function setMyRole(role){
-  const isNew = myRole !== role;
   myRole = role;
   seerResult = null; mediumResult = null;
-  if(isNew){ revealPending = true; revealFlipped = false; }
   renderCurrentScreen();
-}
-function flipRoleCard(){
-  if(revealFlipped) return;
-  revealFlipped = true;
-  document.getElementById('roleCard').classList.add('flipped');
-  const info = ROLE_INFO[myRole] || ROLE_INFO.villager;
-  document.getElementById('cardRoleName').textContent = info.label;
-  document.getElementById('cardRoleDesc').textContent = info.desc;
-  document.getElementById('cardHint').style.display = 'none';
-  document.getElementById('cardStartBtn').style.display = 'block';
-}
-/*
- 修正点: 従来はrenderGame()を直接呼んでいたため、タイマーやムーンアイコンなど
- renderCurrentScreen()側で行っている更新が反映されないことがあった。
- renderCurrentScreen()に統一する。
-*/
-function dismissRoleCard(){
-  revealPending = false;
-  document.getElementById('cardOverlay').classList.add('hidden');
-  renderCurrentScreen();
-}
-function renderRoleCardOverlay(){
-  document.getElementById('cardOverlay').classList.remove('hidden');
-  document.getElementById('roleCard').classList.toggle('flipped', revealFlipped);
-  document.getElementById('cardHint').style.display = revealFlipped ? 'none' : 'block';
-  document.getElementById('cardStartBtn').style.display = revealFlipped ? 'block' : 'none';
-  if(revealFlipped){
-    const info = ROLE_INFO[myRole] || ROLE_INFO.villager;
-    document.getElementById('cardRoleName').textContent = info.label;
-    document.getElementById('cardRoleDesc').textContent = info.desc;
-  }
 }
 
 /* ---------- ゲーム画面描画 ---------- */
@@ -1824,9 +1766,6 @@ function roleTeamClass(role){
 
 function renderGame(){
   if(!room) return;
-  if(revealPending && !amSpectator){ renderRoleCardOverlay(); return; }
-  document.getElementById('cardOverlay').classList.add('hidden');
-
   if(amSpectator){
     showBanner('gameBanner', 'あなたは観戦者です。次のロビーでプレイヤーへ昇格します。');
   }else{
@@ -1999,7 +1938,7 @@ async function leaveRoom(){
 }
 function hardResetToMenu(){
   roomKey=''; roomName=''; room=null; players=[]; messages=[];
-  myRole=null; seerResult=null; mediumResult=null; revealPending=false; amSpectator=false;
+  myRole=null; seerResult=null; mediumResult=null; amSpectator=false;
   activeChatTab='lobby'; dmSelectedId=null; replyTarget=null;
   leavingIntentionally = false;
   document.getElementById('topRoomTag').textContent = '';
